@@ -1,0 +1,1 @@
+../../../tree-sitter-quill/queries/highlights.scm

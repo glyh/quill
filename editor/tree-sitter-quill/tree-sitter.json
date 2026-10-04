@@ -1,0 +1,15 @@
+{
+  "grammars": [
+    {
+      "name": "quill",
+      "scope": "source.quill",
+      "file-types": ["qll"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.0.1",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the quill language (reader-level, approximate)"
+  }
+}
