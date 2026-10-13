@@ -64,6 +64,33 @@ Pin the bootstrap. Let every other unit be found by asking for it.
 (2) is the cheaper of the two and may be all that is wanted; (1) is the one that also
 removes the *position* question rather than only the editing.
 
+## Ruled 2026-10-04 — option 2 only, and the tie-break is the DFS
+
+Waiting on a human decision was the right call: **the derived order does not coincide with
+the hand list**, so "it preserves every semantic the four readers depend on" above is true only
+of the readers that consume *membership* (`Index`/`Of`, `Load`'s `below` set), not of the ones
+that consume *last-ness*.
+
+- **Rule.** The order is the DFS post-order of the import graph rooted at `std/stage2`,
+  following each unit's `import` lines in the order they are written, with the bootstrap
+  pinned first. For today's sources that is
+  `bootstrap, lib, list, type, option, functor, stage2` — today's hand list is
+  `bootstrap, lib, list, option, functor, type, stage2`. `std/type` and
+  `{std/option, std/functor}` are incomparable in the graph, so the difference is a
+  tie-break, not a fact.
+- **Accepted consequence (open questions 2 and 4).** `Std` inside a std unit, and metas
+  seeding, become properties of the derived order: inside `std/option` the former unit is
+  `std/list` and is now `std/type`. Nothing in `std/` reads `Std`, and the suite is the
+  check that metas seeding still holds. Neither question is *answered* here — they are
+  unblocked from this ticket, and stay open as language rulings.
+- **Open question 3 (cycles).** Unchanged in behaviour: a cycle is refused, not knotted.
+  The walk must terminate — it detects the cycle and fails naming it — rather than loop.
+- **Open question 5** is untouched: "nothing below `std` is importable by a program" is a
+  separate visibility rule and must not start or stop holding because of this change.
+- **Option 1 is not this ticket.** Demand-loading is filed as
+  [demand-load the std units](demand-load-std-units.md), blocked on nothing, to be taken up
+  after this lands (it would replace the derived order rather than extend it).
+
 ## Open questions
 
 1. **What replaces `below`?** Demand-loading makes it "the units this one imports,
