@@ -3,7 +3,9 @@ title: Load std units in any order, pinning only the bootstrap
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04 (`3301be0` derivation, `ad33afd` tests; merged `f63047d`). `Prelude.Order` is now `[.. DeriveOrder(UnitSources(), Path, BootstrapPath)]` and lives in the new `src/Quill.Compiler/Prelude.Order.cs`: DFS post-order over each unit's written `import` lines, bootstrap pinned first, a cycle refused naming it (`circular import: "a" -> "b" -> "a"`), and an import of a unit the sources do not hold skipped because the loader reports it. The derived order for the real sources is `bootstrap, lib, list, type, option, functor, std` — the tie-break the ruling predicted, *asserted against the real sources* (`TheRealStdOrderIsTheSevenUnitsBootstrapFirst`) rather than assumed, with `AUnitAddedToTheGraphIsFoundWithoutACompilerEdit` as the point of the ticket: a new unit joins by being imported, with no compiler edit. `Loader`'s contract is untouched, `Load(path, below)` still takes a list, and `Index`/`Stages` are built from `Order` as before. Integrator's own run on the merged tree: **967 cases, 0 failed**, xUnit **210 → 217**. Two limits, both named rather than hidden: the scan reads `import "…"` out of the token stream, so a *quoted* import inside a future std macro body would become a spurious edge (none exists today), and the pinned bootstrap has no guard against gaining an import of its own (only the doc comment saying why it must not). Option 1 stays where the ruling put it — [demand-load the std units](demand-load-std-units.md), now unblocked.
 assignee:
 blocked_by: []
 ---

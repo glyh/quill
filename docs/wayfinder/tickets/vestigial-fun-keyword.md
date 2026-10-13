@@ -3,7 +3,9 @@ title: The `fun` keyword is reserved, unconsumed, and no longer names anything
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04 — **freed**, this ticket's option 1. `Word.Fun` is gone (`TokenTree.cs:24`), `fun` is no longer registered in `Keywords` (`TokenTree.cs:46`), it is gone from the nvim table (`editor/nvim/syntax/quill.vim:18`), and the comment above the Word list now names it beside the other freed spellings. The reservation was real and observable first: `{ fun = 4; end = 1; with = 2; then = 3; else_ = end + with + then + fun; else_ }` failed with `ELAB unsupported Phase 7A keyword: fun at <unknown>:1:2-1:5`, thrown by the enforester's *default* arm (`Enforest.cs:302`) — there was never a rule for `fun`, only the fallback that catches every `Word` with none, which is exactly the ticket's finding. That program is now `values/freed-keywords.qll` (red before the change, `VALUE 10` after), so the ruling is pinned rather than assumed. Integrator's own run: **967 cases, 0 failed**, xUnit **217/217**. Open question 2 — the spec claims keywords are *not* reserved, a weaker claim than `Keywords` implements — is not this ticket's: it is filed as [the keyword reservation mismatch](keywords-are-reserved-but-the-spec-says-shadowable.md).
 assignee:
 blocked_by: []
 ---

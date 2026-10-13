@@ -15,7 +15,7 @@ endif
 
 " Keywords — the fixed reserved set from TokenTree.cs
 syntax keyword funKeyword
-  \ let fun sig fn do match effect module struct enum impl trait
+  \ let sig fn do match effect module struct enum impl trait
   \ pub import open export macro pattern self Self ref deref rec
   \ perform resume method
 

@@ -5,8 +5,9 @@ labels:
   - wayfinder:task
 status: open
 assignee:
-blocked_by:
-  - load-std-units-in-any-order.md
+blocked_by: []
+# unblocked 2026-10-04: load-std-units-in-any-order.md closed (f63047d) — option 2 only, so this
+ticket is the frontier's next std step rather than its continuation.
 ---
 
 # Demand-load the std units, so a path is found by asking for it

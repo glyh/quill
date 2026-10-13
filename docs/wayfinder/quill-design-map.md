@@ -271,6 +271,14 @@ as the frontier reaches them.
   and nvim queries exist meanwhile (`editor/tree-sitter-quill/`, `520ea20`) and are allowed to be
   wrong about operators and macros. What stays fog: the first-class API is designed and unbuilt, and
   the surface may still move. The old ticket is closed as superseded.
+- **Keywords are reserved; the syntax spec says they are not.** `SYNTAX_SPEC.md:40` presents its list
+  as "(not reserved; can be shadowed)" while `Keywords` (`TokenTree.cs:44`) *is* the reserved table —
+  and the claim is observably false, not merely undocumented: probed 2026-10-04, `{ do = 1; do }` and
+  `{ let = 1; let }` die in the reader's default arm, `{ type = 1; type }` and `{ match = 1; match }`
+  at rules that consume the spelling first. The precedent points the other way (Stage 11 increment 2
+  and `fun` freed spellings by *deleting* them), so either the spec's parenthetical is wrong or
+  shadowing needs a phase that can resolve a name — fog until one of those is ruled. Ticket:
+  [the keyword reservation mismatch](tickets/keywords-are-reserved-but-the-spec-says-shadowable.md).
 - ~~**`Self` names two things**~~ — decided 2026-09-15: `Self` is the struct being defined; the recursion placeholder is an unwritable "recursive occurrence" (see mutually-recursive-record-types). — the record-recursion placeholder
   (`VSelfType args`, set by record declarations) and the partial struct type seen
   by struct method bodies (`elab_infer.ml`, `Struct` case). Both share
@@ -346,9 +354,10 @@ as the frontier reaches them.
 
 ### Frontier (2026-09-26 → 2026-10-04)
 
-**2026-10-04 — 18 open**, suite **967 cases, 0 failed, xUnit 210/210** (the integrator's own baseline
-run on `520ea20`). Five tickets that the paragraph below counts as open were **stale rather than open**,
-and one new ticket was filed:
+**2026-10-04 — 16 open**, suite **967 cases, 0 failed, xUnit 217/217** (the integrator's own run on the
+merged `f63047d`). Five tickets the paragraph below counts as open were **stale rather than open**, one
+new ticket was filed, and both tickets this session's forks built are **closed** — see the first two
+bullets:
 
 - `record-the-absence-of-subtyping` (closed) — ruled and recorded in `351369d`; `topics/subtyping.md`.
   Only the frontmatter lagged.
@@ -367,8 +376,31 @@ and one new ticket was filed:
   (`… option, functor, type …`): the two incomparable halves make "what is below me" a tie-break, not a
   fact. `Std` inside a std unit and metas seeding follow the derived order. Option 1, demand-loading, is
   filed separately as [demand-load the std units](tickets/demand-load-std-units.md).
-- **Two forks are in flight on this state and unmerged**: the refinement/evidence desync invariant, and
-  the derived order.
+- **[Load std units in any order](tickets/load-std-units-in-any-order.md) is ruled *and built*.** The
+  hand-written `Prelude.Order` is gone: `DeriveOrder` (`src/Quill.Compiler/Prelude.Order.cs`) walks the
+  import graph from `std/stage2`, and the derived order — `bootstrap, lib, list, type, option, functor,
+  std` — is asserted against the real sources rather than assumed. The two incomparable halves make
+  "what is below me" a tie-break, not a fact, and `Std` inside a std unit follows the derived order
+  (accepted in the ruling; the suite is the check). Option 1 is filed as
+  [demand-load the std units](tickets/demand-load-std-units.md), unblocked by this landing.
+- **[A refinement/evidence desync is an invariant](tickets/evidence-desync-is-an-invariant.md) is built
+  too.** `Context.Refinement` carries the branch's target, and a failure that the Evidence rewrite
+  would have answered now throws `InvalidOperationException` instead of blaming the user with
+  `missing implementation of …`. Proven by an ablation that printed its build's exit code first — the
+  rule this map's last harness note earned.
+- **`fun` was freed, and one more mismatch filed** — `vestigial-fun-keyword` closed. The spelling was
+  reserved with no rule behind it, and what rejected it was the enforester's *default* arm
+  (`Enforest.cs:302`), which is the ticket's finding made executable; `{ fun = 4; … }` is now
+  `values/freed-keywords.qll` (`VALUE 10`), red before the change. Its open question — the spec says
+  keywords are *not* reserved, `Keywords` reserves them — was **probed rather than argued**: `do`/`let`
+  die in the reader's table, `type`/`match` at rules that consume them, so not one spelling in that
+  list is shadowable. Filed as fog rather than fixed, at the user's ruling. The count stays 16: one
+  closed, one filed.
+- **Harness lesson, repeated and paid for.** Both forks were spawned without
+  `isolation: "worktree"`, so they ran in *this* checkout: the first one cut the branch
+  `evidence-desync-invariant`, the second committed on top of it, and no `main` commit was made while
+  they ran. Nothing was lost, and the integration was a fast-forward — but the worktrees were the
+  whole point, so the parameter is part of the brief, not an assumption.
 - The three port umbrellas **stay open as containers**: `port-parity-plan`'s own words are "the port's
   parity frontier is empty", but it holds two unowned residues (the rec-enum unnamed-capture throw, and
   the synonym collector's narrower-than-prototype walk) that are one probe away from being tickets, and

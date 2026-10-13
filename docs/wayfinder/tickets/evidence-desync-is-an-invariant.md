@@ -3,7 +3,9 @@ title: A refinement/evidence desync is an invariant, not a language error
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04 (`d682254` carries the target, `1f2ede4` classifies the failure, `f63047d` the checks; merged `f63047d`). `Context.Refinement` carries the branch's `(level, replacement)` and is set only by `RefineContext`, so it reaches neither a sibling branch nor code after the `match`; the Evidence rewrite is factored into `RefinedEvidence`. `Elaborator.MissingImplementation` re-resolves the demand against each entry as `RefinedEvidence` *would* have written it — if that answers, the failure is the implementation's and throws `InvalidOperationException` with the ticket's message shape, while a genuine absence keeps `missing implementation of …` byte for byte. Ablation evidence, with the build's exit code printed before the observation, as required: `build exit=0` then `FAIL invariant failure (InvalidOperationException): evidence for `Size` was not refined: the branch asks for Size(Char), the entry still says Size(A). RefineContext's Evidence channel missed it.`; the ablation was restored, `git diff src/` empty, the case back to `VALUE 9`. No conformance case was added, deliberately: the desync has **no program** that reaches it, `cases/elaborate/elab-196.qll` is the genuine-absence path a user can write, the exact message is pinned in `TraitTests.cs`, and the regression check builds the broken context by hand (hence the five-line `InternalsVisibleTo` in `Quill.Compiler.csproj`). Integrator's own run on the merged tree: **967 cases, 0 failed**, xUnit **217/217**. Limits: one target, not a stack — a nested refinement keeps only the innermost; and the speculative re-resolution on the failure path touches the shared `MetaContext`, which is sound only because it always precedes a throw.
 assignee:
 blocked_by: []
 ---

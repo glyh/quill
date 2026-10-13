@@ -19,9 +19,10 @@ public abstract partial record TokenKind
     /// <summary>A keyword or punctuation token, identified by its spelling.</summary>
     public sealed record Word(string Spelling) : TokenKind;
 
-    // Keywords. `then`, `with`, `end`, `else` and `Unit` are deliberately absent:
-    // they are ordinary identifiers (STATUS.md, stage 11 increment 2).
-    public static readonly Word Let = new("let"), Fun = new("fun"), Sig = new("sig"),
+    // Keywords. `then`, `with`, `end`, `else`, `Unit` and `fun` are deliberately absent:
+    // they are ordinary identifiers (STATUS.md, stage 11 increment 2; `fun` per
+    // docs/wayfinder/tickets/vestigial-fun-keyword.md).
+    public static readonly Word Let = new("let"), Sig = new("sig"),
         Fn = new("fn"), Do = new("do"), Match = new("match"), Effect = new("effect"),
         Module = new("module"), Struct = new("struct"), Enum = new("enum"),
         Impl = new("impl"), Trait = new("trait"), Pub = new("pub"), Import = new("import"),
@@ -43,7 +44,7 @@ public abstract partial record TokenKind
 
     /// <summary>The keywords, by spelling. Punctuation is matched by the reader directly.</summary>
     public static readonly ImmutableDictionary<string, Word> Keywords =
-        new[] { Let, Fun, Sig, Fn, Do, Match, Effect, Module, Struct, Enum, Impl, Trait,
+        new[] { Let, Sig, Fn, Do, Match, Effect, Module, Struct, Enum, Impl, Trait,
                 Pub, Import, Open, Export, Macro, Pattern, Self, SelfType, Ref, Deref,
                 Rec, Perform, Resume, Method }
             .ToImmutableDictionary(w => w.Spelling);
