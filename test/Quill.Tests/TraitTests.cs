@@ -1,4 +1,5 @@
 using Quill.Compiler;
+using Quill.Kernel;
 
 namespace Quill.Tests;
 
@@ -121,4 +122,51 @@ public class TraitTests
         Assert.Equal("missing implementation of `Size` while inferring the form at <unknown>:1:138-1:150",
             Elaborate("{ " + Size + "impl Size(I64) = module { size = fn(n) { 1 } }; "
                 + "impl Size(Option(a)) = module { size = fn(o) { Size.size(o) } }; 0 }"));
+
+    /// <summary>
+    /// A refinement/evidence desync is the implementation's break, not the user's: the
+    /// invariant names both sides (evidence-desync-is-an-invariant). Only a context no
+    /// program produces reaches it - the refinement marker set while an evidence entry
+    /// still reads the matched variable - so it is built by hand here.
+    /// </summary>
+    [Fact]
+    public void AStaleEvidenceEntryIsAnInvariantNotAMissingImplementation()
+    {
+        var ctx = Desynced(out var size, over: new Value.VAtomTy(AtomTy.Char));
+        var failure = Elaborator.MissingImplementation(ctx, size, [new Value.VAtomTy(AtomTy.Char)]);
+        var invariant = Assert.IsType<InvalidOperationException>(failure);
+        Assert.Equal("evidence for `Size` was not refined: the branch asks for Size(Char), "
+            + "the entry still says Size(A). RefineContext's Evidence channel missed it.", invariant.Message);
+    }
+
+    /// <summary>
+    /// The desync branch keys on "refinement would have answered the demand", not on the
+    /// entry merely reading the matched variable: a demand no refined entry answers is
+    /// still the user's missing implementation.
+    /// </summary>
+    [Fact]
+    public void AnEntryRefinementWouldNotAnswerIsStillAGenuineAbsence()
+    {
+        var ctx = Desynced(out var size, over: new Value.VAtomTy(AtomTy.Char));
+        var failure = Elaborator.MissingImplementation(ctx, size, [new Value.VAtomTy(AtomTy.I64)]);
+        Assert.IsType<FunException>(failure);
+        Assert.Equal("missing implementation of `Size`", failure.Message);
+    }
+
+    /// <summary>No dictionary in scope at all: the user-facing error is not swallowed.</summary>
+    [Fact]
+    public void NoDictionaryInScopeIsAMissingImplementation() =>
+        Assert.Equal("missing implementation of `Size` while inferring the form at <unknown>:1:43-1:57",
+            Elaborate("{ " + Size + "Size.size('c') }"));
+
+    /// <summary>A branch context refined to <paramref name="over"/> whose one evidence entry still reads the matched variable <c>A</c>.</summary>
+    private static Context Desynced(out TraitDecl size, Value over)
+    {
+        size = new TraitDecl("Size", [], Value.VU.Instance);
+        var ctx = Context.Empty(new MetaContext()).Bind("A", Value.VU.Instance);
+        var matched = new Value.VVar(0, []);
+        (ctx, var dict) = ctx.BindAnonymous(new Value.VTraitDict(size, [matched], []));
+        return ctx.AddEvidence(new TraitEvidence(size, [matched], dict.Level, dict.Type))
+            with { Refinement = (0, over) };
+    }
 }
