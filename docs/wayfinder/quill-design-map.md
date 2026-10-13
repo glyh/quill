@@ -1,11 +1,11 @@
 ---
-title: Fun Compiler Design Map
+title: Quill Compiler Design Map
 labels:
   - wayfinder:map
 status: open
 ---
 
-# Fun Compiler Design Map
+# Quill Compiler Design Map
 
 > **Local-tracker note:** this repo has no `docs/agents/issue-tracker.md`, so the
 > map uses the local-Markdown convention. Each ticket is a file under
@@ -261,14 +261,16 @@ as the frontier reaches them.
   expansion-side *span* stays live in
   [enforester improvements](tickets/scope-enforester-improvements.md), where the starting point is that
   two `struct-field-*` cases already print a position.
-- **Syntax highlighting** — the user wants to see proper highlighting soon, but tree-sitter (a
-  context-free parser) is a doubt given `quill`'s surface: enforestation means the token stream is not
-  the syntax tree, operator demotion means `+` is a library declaration not a keyword, and
-  scope-aware binding means a name's role depends on the binding table. A correct highlighter has to
-  elaborate bindings per unit, which makes it a client of the first-class API fog item. The existing
-  analysis is in `docs/ideas/tooling-and-diagnostics.md` §"The highlighting grammar is a second
-  artefact". Ticket: [syntax-highlighting](tickets/syntax-highlighting.md). Fog because the
-  first-class API is not built, the surface may still change, and no consumer exists yet.
+- **Syntax highlighting** — *sharpened 2026-10-04: the fog is now the API, not the consumer.* The
+  surface is still hostile to a context-free grammar (enforestation, operator demotion, scope-aware
+  binding), but the analysis has left `docs/ideas/` for
+  [the syntax highlighting server](topics/syntax-highlighting-server.md) (`afea2f2`): a long-running
+  compiler server over msgpack-RPC, tree-sitter's *pattern* rather than its API, the first slice of
+  [the first-class compiler API](topics/first-class-elaborator-api.md) as the server's tree
+  interface, and "good enough static grammar" explicitly rejected. A best-effort tree-sitter grammar
+  and nvim queries exist meanwhile (`editor/tree-sitter-quill/`, `520ea20`) and are allowed to be
+  wrong about operators and macros. What stays fog: the first-class API is designed and unbuilt, and
+  the surface may still move. The old ticket is closed as superseded.
 - ~~**`Self` names two things**~~ — decided 2026-09-15: `Self` is the struct being defined; the recursion placeholder is an unwritable "recursive occurrence" (see mutually-recursive-record-types). — the record-recursion placeholder
   (`VSelfType args`, set by record declarations) and the partial struct type seen
   by struct method bodies (`elab_infer.ml`, `Struct` case). Both share
@@ -342,7 +344,36 @@ as the frontier reaches them.
 
 ## Open questions
 
-### Frontier (2026-09-26)
+### Frontier (2026-09-26 → 2026-10-04)
+
+**2026-10-04 — 18 open**, suite **967 cases, 0 failed, xUnit 210/210** (the integrator's own baseline
+run on `520ea20`). Five tickets that the paragraph below counts as open were **stale rather than open**,
+and one new ticket was filed:
+
+- `record-the-absence-of-subtyping` (closed) — ruled and recorded in `351369d`; `topics/subtyping.md`.
+  Only the frontmatter lagged.
+- `impl-head-written-bound` (closed) — the semantics landed `418f28b`; the binder error is live at
+  `Elaborator.Traits.cs:274`. Its surface *spelling* was always the Stage 11 spec's.
+- `negative-tuple-arity-and-crash-class-mutants` (closed) — all three items under *Remains* measured
+  (`b3fa0fc`, `ddd138d`), and `--isolated` is in the runner. The surviving note is a process rule: the
+  sweep runs isolated.
+- `design-std-library-surface` (closed) — 19 decisions `d70567d`; its last unshipped piece closed
+  2026-09-28 and both impls are in the library today (`std/list.qll:297`, `std/option.qll:46`).
+- `syntax-highlighting` (closed) — superseded by `topics/syntax-highlighting-server.md`; see the fog
+  item above.
+- **[Load std units in any order](tickets/load-std-units-in-any-order.md) is ruled, not open** — the
+  hand-written `Prelude.Order` is replaced by a DFS post-order walk from `std/stage2`, and the derived
+  order (`bootstrap, lib, list, type, option, functor, stage2`) is *accepted* against today's
+  (`… option, functor, type …`): the two incomparable halves make "what is below me" a tie-break, not a
+  fact. `Std` inside a std unit and metas seeding follow the derived order. Option 1, demand-loading, is
+  filed separately as [demand-load the std units](tickets/demand-load-std-units.md).
+- **Two forks are in flight on this state and unmerged**: the refinement/evidence desync invariant, and
+  the derived order.
+- The three port umbrellas **stay open as containers**: `port-parity-plan`'s own words are "the port's
+  parity frontier is empty", but it holds two unowned residues (the rec-enum unnamed-capture throw, and
+  the synonym collector's narrower-than-prototype walk) that are one probe away from being tickets, and
+  `port-unported-path-audit` records "none is unowned". `specify-stage-11-…` keeps one live item:
+  `ref`/`deref` as primitives.
 
 **2026-10-03 — 22 open** (frontmatter count, the three port umbrellas among them),
 **suite 961 cases, 0 failed, xUnit 210/210** — the 2026-10-01 session closed 17 open with six forks
@@ -443,8 +474,10 @@ mechanism ([type-case-refinement](tickets/type-case-refinement-walks-whole-conte
 [a written bound on an impl head](tickets/impl-head-written-bound.md); `Id` as type vs hole-kind and
 `Block`'s placement ([prelude-abi](tickets/prelude-abi-remaining-spellings.md)); whether error
 recovery has a workload at all ([enforester improvements](tickets/scope-enforester-improvements.md));
-and two this session surfaced — delete the four `elab-NNN` twins (one per pair: 093/135, 094/136,
-095/137, and one of 249/250), and whether one line of
+and two this session surfaced — ~~delete the `elab-NNN` twins~~ (**settled 2026-10-01**: 093/094/095
+were deleted, `961 → 958`, and `249/250` is not a pair — `deref(1)` reads a non-reference while
+`1 <- 2` writes to one, two different refusals, nothing deleted; the suite ticket's own closing
+section has the readings) — and whether one line of
 `Budget.Where()` is worth the nine xUnit message assertions it breaks.
 
 **Harness note (not a project artifact).** All three original forks died at once on

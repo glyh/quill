@@ -3,7 +3,9 @@ title: Design the user-facing library surface of std
 parent: ../quill-design-map.md
 labels:
   - wayfinder:grilling
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04 — the surface question is answered and shipped. 19 decisions and 31 bindings landed (`d70567d`), and the last unshipped piece, [Eq for List and Option](std-eq-for-list-and-option.md), closed 2026-09-28; both impls are in the library today (`std/list.qll:297` `pub impl list_eq`, `std/option.qll:46` `pub impl option_eq`, re-exported by `std/stage2.qll`). New syntax this ticket deferred belongs to the Stage 11 spec; a written-bound form is [impl head's](impl-head-written-bound.md) spelling question, also settled.
 assignee:
 blocked_by: []
 decided: 2026-09-27

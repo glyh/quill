@@ -3,7 +3,9 @@ title: The negative-tuple-arity refusal, and crash-class mutants in the suite
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04 — every item under *Remains* is measured. The guard stays (`Primitives.cs:165`); `elaborate/tuple-negative-arity.qll` pins the in-process refusal, `elaborate/tuple-negative-arity-crash-class.qll` the crash class, and `--isolated` (already in `test/Quill.Conformance`) classifies either outcome as one case's failure — measured both ways (`b3fa0fc`, `ddd138d`). Standing process note, kept here rather than in code: the mutation sweep runs with `--isolated`, because a crash-class mutant is only classifiable per case that way.
 assignee:
 blocked_by:
 ---

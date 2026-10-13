@@ -3,7 +3,9 @@ title: Syntax highlighting for quill
 parent: ../quill-design-map.md
 labels:
   - wayfinder:fog
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Superseded 2026-10-04 by `topics/syntax-highlighting-server.md` (`afea2f2`), which answers this ticket's two "what would sharpen it" questions — consumer = neovim via a compiler server over msgpack-RPC, and "good enough static grammar" explicitly rejected in favour of elaborator-driven spans. A best-effort tree-sitter grammar and nvim queries exist meanwhile (`editor/tree-sitter-quill/`, `520ea20`) and are allowed to be wrong about operators and macros. What is still fog is the first-class compiler API (`topics/first-class-elaborator-api.md`), designed and unbuilt — that is the live item, not this ticket.
 assignee:
 blocked_by: []
 ---
@@ -51,19 +53,27 @@ makes it a client of the first-class compiler API — not a standalone grammar.
   highlighter depends on it.
 - The surface syntax may still change (the "surface syntax after the macro model
   settles" fog item). A grammar written today may need rewriting.
-- No editor integration exists yet — no LSP, no CLI --highlight mode, nothing that
-  would consume a highlighter. The consumer is hypothetical.
+- No editor integration *consumed* a highlighter when this was written; that is no longer true —
+  `editor/tree-sitter-quill/` and `editor/nvim/` exist (`520ea20`), and
+  [`topics/syntax-highlighting-server.md`](../topics/syntax-highlighting-server.md) (`afea2f2`)
+  rules the consumer (neovim) and the shape (a long-running compiler server, not a grammar).
 - The cheapest useful thing (a TextMate grammar for the common case, accepting
   that operators and macro uses will be wrong) is a few hours of work and drifts
   immediately. Whether that trade-off is worth it is a user decision, not a
   technical one.
 
-## What would sharpen it
+## What would sharpen it — answered 2026-10-04
 
-- A decision on whether "good enough now" (a static grammar that handles keywords,
-  delimiters, and comments but not operators or macros) is worth shipping, or
-  whether to wait for the first-class API.
-- A decision on the consumer: editor extension? LSP? CLI pretty-printer? Each has
-  a different cost and a different correctness ceiling.
-- The first-class API fog item moving to a ticket — a highlighter is one of its
-  natural first consumers.
+- **"Good enough now" vs wait for the API** — *answered: ship both, but only the grammar is
+  allowed to be wrong.* The static grammar landed as a best-effort tree-sitter grammar
+  (`editor/tree-sitter-quill/`, `520ea20`) for keywords, delimiters and comments, explicitly
+  accepting that operators and macro uses mis-colour; the precise path is the server.
+- **The consumer** — *answered: neovim, through the server.*
+  [`topics/syntax-highlighting-server.md`](../topics/syntax-highlighting-server.md) `afea2f2`:
+  msgpack-RPC over stdio, tree-sitter's *pattern* rather than its API, a ~50-line Lua client with no
+  language logic, and the first slice of the first-class compiler API as the server's tree
+  interface.
+- **The first-class API moving to a ticket** — *moved, as a topic*:
+  [`topics/first-class-elaborator-api.md`](../topics/first-class-elaborator-api.md) (`docs/ideas/`
+  before that). This ticket is therefore closed rather than open: it has no question left of its own,
+  and what gates the implementation is the API, which the map tracks as fog.

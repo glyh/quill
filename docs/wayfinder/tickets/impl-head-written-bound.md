@@ -3,7 +3,9 @@ title: A written bound on an impl head
 parent: ../quill-design-map.md
 labels:
   - wayfinder:grilling
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Closed 2026-10-04. The semantics question is answered and implemented (`418f28b`): a written bound on an impl head is authoritative, the three edges the ruling did not name are handled in `Elaborator.Traits.Contribute`, and the binder error is live (`Elaborator.Traits.cs:274`). The surface *spelling* was never this ticket's — `design-std-library-surface.md` §14 sent new syntax to the Stage 11 spec, which is where a written-bound form is spelled if it is ever wanted.
 assignee:
 blocked_by: []
 ---

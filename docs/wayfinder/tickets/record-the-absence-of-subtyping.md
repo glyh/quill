@@ -3,7 +3,9 @@ title: Record the absence of subtyping
 parent: ../quill-design-map.md
 labels:
   - wayfinder:grilling
-status: open
+status: closed
+closed_date: 2026-10-04
+resolution: Ruled 2026-10-04 and recorded (`351369d`): `quill` has no subtyping relation — NbE convertibility is the only equality, records are structural and exact, `grep -rniE 'coerc' src/` = **0**, and the one width rule (module↔signature unification in `Unify.Structs.Modules`) is named in three comments and pinned by `values/core-021.qll`. Detail: `topics/subtyping.md`. The status flip was the last thing outstanding; the ticket was already resolved in its body.
 assignee:
 blocked_by: []
 ---
