@@ -12,7 +12,7 @@ namespace Quill.Compiler;
 /// its imports, and <c>std</c> against the whole library. The base context binds the
 /// topmost unit as <c>Std</c> (glossary: Base context, Prelude; bound, not opened).
 /// </summary>
-public static class Prelude
+public static partial class Prelude
 {
     public const string Path = "std";
 
@@ -24,9 +24,10 @@ public static class Prelude
 
     public const string Binding = "Std";
 
-    /// <summary>The prelude's units, lowest first. Each is elaborated against the ones
-    /// before it, and <see cref="Path"/> is the one a program imports.</summary>
-    private static readonly string[] Order = [BootstrapPath, "std/lib", "std/list", "std/option", "std/functor", "std/type", Path];
+    /// <summary>The prelude's units, lowest first - derived, not written down
+    /// (<see cref="DeriveOrder"/>): each is elaborated against the ones before it, and
+    /// <see cref="Path"/> is the one a program imports.</summary>
+    private static readonly string[] Order = [.. DeriveOrder(UnitSources(), Path, BootstrapPath)];
 
     private static readonly Dictionary<string, int> Index =
         Order.Select((path, i) => (path, i)).ToDictionary(x => x.path, x => x.i);
