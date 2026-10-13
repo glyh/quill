@@ -607,7 +607,7 @@ public static partial class Elaborator
     private static Term Evidence(Context ctx, TraitDecl trait, EquatableArray<Value> args)
     {
         if (ResolveEvidence(ctx, trait, args) is { } found) return found.Term;
-        if (!args.Any(a => Unresolved(ctx, a))) throw new FunException($"missing implementation of `{trait.Name}`");
+        if (!args.Any(a => Unresolved(ctx, a))) throw MissingImplementation(ctx, trait, args);
         var meta = ctx.Metas.Fresh();
         ctx.Metas.PendingEvidence.Add(new PendingEvidence(meta, ctx, trait, args));
         return new Term.InsertedMeta(meta, ctx.EntryKinds);
@@ -626,9 +626,9 @@ public static partial class Elaborator
             metas.PendingEvidence.Remove(pending);
             var ctx = pending.Context;
             var found = ResolveEvidence(ctx, pending.Trait, pending.Args)
-                ?? throw new FunException(pending.Args.Any(a => ctx.Force(a) is Value.VMeta)
-                    ? $"cannot choose an implementation of `{pending.Trait.Name}`: its argument type is never known"
-                    : $"missing implementation of `{pending.Trait.Name}`");
+                ?? throw (pending.Args.Any(a => ctx.Force(a) is Value.VMeta)
+                    ? new FunException($"cannot choose an implementation of `{pending.Trait.Name}`: its argument type is never known")
+                    : MissingImplementation(ctx, pending.Trait, pending.Args));
             // The chosen dictionary is one value whatever the meta is applied to (levels
             // are stable), so its solution ignores the spine: a lambda per bound entry.
             Term solution = new Term.Imported(ctx.Eval(found.Term));
@@ -640,6 +640,58 @@ public static partial class Elaborator
 
     /// <summary>Whether an argument is not yet known well enough to say no impl exists for it.</summary>
     private static bool Unresolved(Context ctx, Value arg) => ctx.Force(arg) is Value.VMeta or Value.VVar or Value.VNeutral;
+
+    /// <summary>
+    /// The failure when no entry implements <paramref name="trait"/> at <paramref name="args"/>.
+    /// A genuine absence is the user's <c>missing implementation</c>; but an evidence entry
+    /// refinement left reading the matched variable - one that would answer the demand had
+    /// <c>RefineContext</c>'s Evidence channel rewritten it - is the implementation's own
+    /// break, an invariant failure rather than a language error.
+    /// </summary>
+    internal static Exception MissingImplementation(Context ctx, TraitDecl trait, EquatableArray<Value> args)
+    {
+        if (ctx.Refinement is { } refinement)
+        {
+            var stale = ctx.Evidence.FirstOrDefault(e => ReferenceEquals(e.Trait, trait)
+                && ResolveEvidence(ctx with
+                {
+                    Evidence = ImmutableList.Create(RefinedEvidence(ctx, refinement.Level, refinement.Replacement, e)),
+                }, trait, args) is not null);
+            if (stale is not null)
+                return new InvalidOperationException(
+                    $"evidence for `{trait.Name}` was not refined: the branch asks for {DescribeDict(ctx, trait.Name, args)}, "
+                    + $"the entry still says {DescribeDict(ctx, stale.Trait.Name, stale.Args)}. RefineContext's Evidence channel missed it.");
+        }
+        return new FunException($"missing implementation of `{trait.Name}`");
+    }
+
+    /// <summary>A dictionary type's name and arguments, for an invariant's message: <c>Size(Char)</c>.</summary>
+    private static string DescribeDict(Context ctx, string name, EquatableArray<Value> args) =>
+        $"{name}({string.Join(", ", args.Select(a => DescribeArg(ctx, a)))})";
+
+    /// <summary>One dictionary argument, for an invariant's message: <c>Char</c>, <c>A</c>.</summary>
+    private static string DescribeArg(Context ctx, Value arg) => ctx.Force(arg) switch
+    {
+        Value.VAtomTy t => t.Ty.ToString(),
+        Value.VU => "Type",
+        Value.VVar v => NameAt(ctx, v.Level),
+        Value.VNominal n => n.Decl.Name,
+        Value.VCon c => c.Name,
+        Value.VTraitDict d => DescribeDict(ctx, d.Decl.Name, d.Args),
+        var other => other.GetType().Name,
+    };
+
+    /// <summary>The context name bound at <paramref name="level"/>, as a user wrote it.</summary>
+    private static string NameAt(Context ctx, int level)
+    {
+        foreach (var (name, entry) in ctx.Names)
+            if (entry.Level == level)
+            {
+                var i = name.IndexOf('#');
+                return i >= 0 ? name[..i] : name;
+            }
+        return $"#{level}";
+    }
 
     /// <summary>
     /// Whether an impl head's arguments match a use's: read-back equality, or a

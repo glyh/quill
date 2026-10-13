@@ -6,6 +6,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Quill.Tests asserts an exact error constructor (the evidence-desync invariant). -->
+    <InternalsVisibleTo Include="Quill.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The prelude's source, the port's own copy (docs/wayfinder/tickets/port-core-tt-to-dotnet.md). -->
     <EmbeddedResource Include="..\..\std\*.qll" LogicalName="std/%(Filename)%(Extension)" />
   </ItemGroup>
