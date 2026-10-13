@@ -3,6 +3,17 @@ using Quill.Kernel;
 
 namespace Quill.Compiler;
 
+public sealed partial record Context
+{
+    /// <summary>
+    /// The type-case refinement a branch is elaborated under: the matched variable's
+    /// level, and what the branch reads it as. It lives only on the context
+    /// <c>RefineContext</c> derives for that branch, so it can reach
+    /// neither a sibling branch nor code after the <c>match</c>.
+    /// </summary>
+    public (int Level, Value Replacement)? Refinement { get; init; }
+}
+
 public static partial class Elaborator
 {
     /// <summary>
@@ -586,11 +597,15 @@ public static partial class Elaborator
         ConstructorEntries = ctx.ConstructorEntries.ToImmutableDictionary(c => c.Key, c => c.Key < level
             ? c.Value
             : (Substitute(ctx, level, replacement, c.Value.Type), Substitute(ctx, level, replacement, c.Value.TypeType), c.Value.Constructor)),
-        Evidence = ctx.Evidence.Select(e => e with
-        {
-            Args = [.. e.Args.Select(a => Substitute(ctx, level, replacement, a))],
-            Type = Substitute(ctx, level, replacement, e.Type),
-        }).ToImmutableList(),
+        Evidence = ctx.Evidence.Select(e => RefinedEvidence(ctx, level, replacement, e)).ToImmutableList(),
+        Refinement = (level, replacement),
+    };
+
+    /// <summary>The evidence entry with the matched variable at <paramref name="level"/> read as <paramref name="replacement"/>: what the Evidence channel writes.</summary>
+    private static TraitEvidence RefinedEvidence(Context ctx, int level, Value replacement, TraitEvidence e) => e with
+    {
+        Args = [.. e.Args.Select(a => Substitute(ctx, level, replacement, a))],
+        Type = Substitute(ctx, level, replacement, e.Type),
     };
 
     /// <summary>The entry with the bound variable at <paramref name="level"/> read as <paramref name="replacement"/>.</summary>
