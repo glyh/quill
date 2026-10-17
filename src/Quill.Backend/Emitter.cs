@@ -115,7 +115,11 @@ internal sealed class Emitter
         _type.CreateType();
         using var stream = new MemoryStream();
         assembly.Save(stream);
-        var loaded = Assembly.Load(stream.ToArray());
+        var image = stream.ToArray();
+        // Debugging hook: QUILL_BACKEND_IL writes the emitted image out to disassemble.
+        if (System.Environment.GetEnvironmentVariable("QUILL_BACKEND_IL") is { Length: > 0 } path)
+            File.WriteAllBytes(path, image);
+        var loaded = Assembly.Load(image);
         var method = loaded.GetType("Quill.Generated.Program")!.GetMethod("Entry")!;
         return (Func<object>)method.CreateDelegate(typeof(Func<object>));
     }
