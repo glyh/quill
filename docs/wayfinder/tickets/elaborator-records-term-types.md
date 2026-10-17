@@ -10,6 +10,41 @@ blocked_by: []
 
 # The elaborator records a type for every term it builds
 
+## Where it stands — 2026-10-13, two forks died mid-work
+
+The keying decision is **made and documented**, the mechanism works where it is wired, and the
+recording is **incomplete in a way that is now measured rather than guessed**.
+
+**Branches, neither merged.** `fork/elaborator-records-term-types` (`eaf8628`) and
+`pi-agent-ca0ce18c-6795-469` (`9527ae1`, which merges the first and adds a measurement). Both
+build, both pass xUnit (218) and the conformance suite (967 / 0 failed), and **neither is
+mergeable**: the second is cut before the map and ticket updates above it, so merging it would
+revert them, and both carry a scratch probe promoted to a test
+(`test/Quill.Tests/ProbeDumpTests.cs` writes `/tmp/probe-dump.txt` and asserts nothing).
+
+**The holes, measured** by running that branch's `CoverageProbe` (a diagnostic that prints
+per-category counts; it is not an assertion-based test, which is itself part of what is missing):
+
+| program | recorded / total |
+| --- | --- |
+| `trait Eq(a) … impl Eq(I64) = module { eq = fn(x, y) { x < y } }` | **Lam 0/2**, **Struct 0/1**, Let 2/2, Pi 2/2 |
+| `struct C { v : I64; method get() { self.v } }` | **Lam 0/1**, **Struct 1/3**, Let 1/1, Pi 1/1 |
+| `rec f : I64 -> I64 = fn(n) { if … }` | **Fix 0/1**, Lam 1/1, Match 1/1, Let 1/1, Pi 1/1 |
+| `rec a = fn(x) { x } and b = fn(y) { y }` | **Fix 0/2**, **Lam 0/4**, Let 1/2, Pi 2/2 |
+| `(fn(x) { x + 1 })(7)` | **Lam 1/1** — the ticket's key case passes |
+| `match (1 + 2) { v => v + 1 }` | Match 1/1 |
+
+Read off that: **`Fix` is never recorded at all** (the case a signature-hungry emitter needs most),
+`Struct` fields and impl methods are mostly missed, and lambdas reached other than through a
+recorded chain are missed. What works is `Let`, `Pi`, `Match`, and lambda chains under a recorded
+head. Call sites exist in `Elaborator.cs`, `.Enum.cs`, `.Generalise.cs`, `.Methods.cs` only —
+`.Structs.cs`, `.Traits.cs`, `.Match.cs` and `.RecTypes.cs` have none.
+
+**What is still owed, in order:** delete the scratch test; make the coverage measurement an
+assertion (per category, with a non-trivial recorded count, or a test that passes on an empty table
+is worthless); then record the missing sites, `Fix` first. Nothing consumes the table yet, so this
+is not on the backend's critical path.
+
 ## Question
 
 `Core.term` is untyped: `Lam(Term Body)` (`Core.cs:19`) and
