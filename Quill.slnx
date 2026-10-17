@@ -9,4 +9,7 @@
     <Project Path="test/Quill.Conformance/Quill.Conformance.csproj" />
     <Project Path="test/Quill.Tests/Quill.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Quill.DumpTerm/Quill.DumpTerm.csproj" />
+  </Folder>
 </Solution>

@@ -12,21 +12,30 @@ this holds the ruling and the evidence behind it.
 
 ## What is decided (2026-10-13)
 
-1. **Target: emit C#, compile in-process with Roslyn.** `Core.term` → C# source text →
-   `Microsoft.CodeAnalysis.CSharp` (`CSharpCompilation.Create` + `Emit(MemoryStream)`) →
-   load → invoke the entry method. Not IL by hand, not `dotnet build` as a subprocess.
-   Cost accepted: one dependency (`Microsoft.CodeAnalysis.CSharp`, already in the local
-   NuGet cache), a second compiler in the process, and the emitted source's assembly
-   identity is ours to manage.
-2. **Value model: native .NET types, typed where the term carries a type.** `Atom.I64` is
-   C# `long`; a nominal's constructors are generated classes; closures are real C#
-   delegates/local functions. **Not** the evaluator's `Value` hierarchy.
-3. **Acceptance of the first slice: `Backend.Run(elaborated)` beside `Driver.Run`, then
+1. **Target: emit IL, not C# source.** `Core.term` → IL, built with `System.Reflection.Emit`
+   (`ILGenerator`) and saved with `PersistedAssemblyBuilder` (the .NET 9+ type that writes a
+   dynamic assembly to disk). This **supersedes** the first answer of the day (emit C# and compile
+   it in-process with Roslyn): `ILGenerator.Emit(OpCodes.Tailcall)` writes the prefix C# has no
+   syntax for, and F#'s coverage of mutual and higher-order tail calls depends on exactly that
+   prefix (measured below). The Roslyn dependency goes away entirely.
+   Cost accepted: the emitted code is **no longer readable**, so an emitter bug is debugged by
+   disassembling rather than by diffing C#; and ECMA-335 encoding is ours to get right (the
+   generator does the encoding, not the stack depths).
+2. **Value model: native .NET types, typed where the term carries a type.** `Atom.I64` is IL
+   `int64`; a nominal's constructors are generated classes; closures are real methods plus
+   generated closure classes. **Not** the evaluator's `Value` hierarchy.
+3. **Effectful code: a state machine only where the effect row needs it.** Pure arrows emit plain
+   IL methods with `tail.` at tail positions; arrows carrying effects emit a machine whose fields
+   hold what is live across a suspension, with an `int` state as the resume point and one switch
+   at entry (F#'s resumable-code shape). Accepted limit: a tail call inside a machine is an
+   ordinary call, because `tail.` is illegal in such a method. Detail and alternatives:
+   [the two choices](dotnet-backend-choices.md).
+4. **Recursion: direct style on the CLR stack where the row is pure, with `tail.` at tail
+   positions and a depth guard elsewhere.** The guard exists for the shapes `tail.` cannot cover
+   (a tail call inside a machine, and non-tail recursion).
+5. **Acceptance of the first slice: `Backend.Run(elaborated)` beside `Driver.Run`, then
    diff the suite.** The 651 value-producing conformance cases run through both paths and
    the `VALUE` lines are compared. The interpreter stays the reference until parity is met.
-4. **Recursion: direct style on the CLR stack, with a self-imposed depth guard.** Quill
-   recursion is no longer bounded by memory but by the native stack — a deliberate
-   language-semantics change, recorded below with the measurement that forced it.
 
 **The interpreter is not deleted by this work.** `Nbe.Eval` is the elaborator's normalizer
 (`Elaborator.cs:93`), it evaluates every import (`Loader.cs:130`) and every std unit
@@ -163,13 +172,16 @@ Each slice is separately verifiable and leaves the previous one working.
 
 | slice | contents | acceptance |
 | --- | --- | --- |
-| 1a | project, runtime, Roslyn host, `Backend.Run`; emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; typed `long` where `Let.Type` says `I64` | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend |
+| 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions `CanTailcall`-style checks accept | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive |
 | 1b | `Match` over `DecisionTree`s, and prelude-function compilation from the value graph | `fib(30)` → `832040`, and faster than the 13.6 s baseline |
 | 1c | `Con`/nominal/struct/record/tuple, `Open`, `Proj`/`Dot` | the `values/` match/struct/record population matches the interpreter |
-| 1d | refs (`VRef`, `RefCell`), effects (`Perform`/`Tunnel`/`resume` continuations) | the 43 ref and 55 effect cases |
+| 1d | refs (`VRef`, `RefCell`), effects: the machine for arrows whose row is non-empty, `perform` handing it the machine, `resume` re-entering at its state, one-shot enforced by clearing it | the 43 ref and 55 effect cases, including `core-098` (43), `core-049` (5) and `ref-nbe-continuation-used` (still `error`) |
 | 1e | traits/dictionaries, type-case, generative stamps | the remaining type-case cases |
 | 1f | the elaboration-time annotation pass; typed emission everywhere | typed tier; `--backend dotnet` becomes the default in the runner |
-| 2 | `quill run` / `quill build` in `src/Quill.Cli`; delete `Driver.Run` as a program path | the binary is the artifact |
+| 2 | `quill build` writing the assembly `PersistedAssemblyBuilder` produces; delete `Driver.Run` as a program path | the binary is the artifact |
+
+Slice 1a (Roslyn, C# source) is **superseded before merge** — its `Runtime.cs`, CLI and parity
+harness are salvaged into 1a′, and its C#-text emitter is dropped, since nothing would run it.
 
 ## Open
 
@@ -185,8 +197,11 @@ to work already done. Summary of what is open, with the reading doc as the detai
 
 ### 1. Tail-call strategy — ruled 2026-10-13: emit IL
 
-F# covers the general case with a `tail.` prefix at the delegate-`Invoke` site, which C# cannot
-express (section above). Three C#-expressible answers, with what each actually buys:
+Ruled: **the backend emits IL**, and `tail.` is written at tail positions the way F# writes it,
+including inside the closure `Invoke` method F# synthesizes for a tail call to an unknown callee.
+That supersedes emitting C# source with Roslyn, which is why slice 1a is re-cut as 1a′.
+
+The alternatives that were weighed, kept for the record:
 
 | option | covers | cost |
 | --- | --- | --- |
@@ -194,7 +209,16 @@ express (section above). Three C#-expressible answers, with what each actually b
 | **TailCall sentinel + trampoline** | all three shapes | a wrapper/dispatch loop on every tail-calling function, and one allocation per unknown-callee tail call; C#-only |
 | **an IL tier emitting real `tail.`** | all three, F#'s exact coverage | a second emitter (IL, not C#) — the C# assembly would have to be emitted as IL too, or post-processed |
 
-### 2. Effects under direct style (slice 1d)
+### 2. Effects — ruled 2026-10-13: a machine only where the effect row needs it
+
+Ruled: pure arrows emit plain IL with `tail.`; arrows whose row is non-empty emit a machine
+(fields for what is live across a suspension, `int` state, one switch at entry), with `perform`
+handing the handler the machine itself as the continuation and `resume` re-entering at its state.
+One-shot falls out of clearing the state, so `ref-nbe-continuation-used` stays an error for free.
+Accepted limit: a tail call inside a machine consumes CLR stack. Option-by-option detail, with the
+emitted shapes and the four alternatives: [the two choices](dotnet-backend-choices.md).
+
+### 2b. What was weighed for effects (record)
 
 `resume` re-pushes a captured `Kont` slice (`Nbe.Effects.cs:120`) and is one-shot by choice, so
 it fits a state machine well (nothing needs cloning). F#'s shipped shape is the reference and is

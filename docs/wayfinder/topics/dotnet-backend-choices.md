@@ -2,13 +2,22 @@
 title: A .NET backend — the two choices still open
 labels:
   - wayfinder:topic
-status: open
+status: decided
 ---
 
 # The two choices still open
 
-Read this instead of the terminal. Two decisions remain; everything else about the backend is
-ruled and recorded in [dotnet-backend.md](dotnet-backend.md).
+**Ruled 2026-10-13, so this document is now the record rather than a question:**
+
+- **Decision 1 — effectful code: option 1**, the machine only where the effect row needs it. Pure
+  arrows emit plain IL methods with `tail.` at tail positions; effectful arrows emit a machine.
+  Accepted limit: a tail call *inside* a machine consumes CLR stack, because `tail.` is illegal in
+  a method that carries a state machine. F# made the same call.
+- **Decision 2 — `Reflection.Emit` + `PersistedAssemblyBuilder`**, because `OpCodes.Tailcall` is
+  the whole reason the pivot to IL is cheap, and `ILGenerator` computes `maxstack` and encodes
+  instructions.
+
+Read on for what each option was and why, which stays useful when a slice is revisited.
 
 **Where things stand, in four lines.**
 
@@ -55,7 +64,7 @@ judged against them:
 
 ---
 
-## Option 1 — machine only where the effect row needs it (recommended)
+## Option 1 — machine only where the effect row needs it — **RULED, chosen**
 
 Pure arrows become plain IL methods, with `tail.` at tail positions. Effectful arrows become a
 machine whose fields hold what survives a suspension.
@@ -215,7 +224,7 @@ rows are usually narrow.
 
 # Decision 2 — which tool generates the IL
 
-## Option A — `Reflection.Emit` + `PersistedAssemblyBuilder` (recommended)
+## Option A — `Reflection.Emit` + `PersistedAssemblyBuilder` — **RULED, chosen**
 
 ```
 var il = mb.GetILGenerator();
@@ -283,9 +292,5 @@ its assembly, so that route is two assemblies and a cross-assembly call at every
 
 # What I need from you
 
-1. **Decision 1** — one of: option 1 (machine only where the row needs it, recommended), option 2
-   (machine + sentinel inside it), option 3 (universal machine), option 4 (CPS + trampoline).
-2. **Decision 2** — `Reflection.Emit` (recommended) or the raw metadata writer.
-3. Optional: whether to keep the dead Roslyn branch for reference or drop it. My recommendation is
-   to salvage its `Runtime.cs`, CLI and parity harness into the IL branch and delete the C#-text
-   emitter, because a second emitter that nothing runs is a liability, not a reference.
+Nothing — both decisions are made and recorded above. The next step is a slice 1a' fork that emits
+IL, salvaging `Runtime.cs`, the CLI and the parity harness from the dead Roslyn branch.
