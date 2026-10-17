@@ -2,13 +2,20 @@
 // receives it. Docs: docs/wayfinder/topics/dotnet-backend-term-shapes.md.
 //
 //   quill-dump-term <file.qll> [--expand] [--depth N] [--env N] [--type] [--no-run]
+//                  [--values] [--max-bytes N]
 //
 //   --expand     print module bindings instead of eliding them
 //   --depth N    stop recursing past N (default 60)
 //   --env N      print the value of Context.Environment[N] (a de Bruijn index)
 //   --type       print the program's type (a Value) only
 //   --no-run     skip the Context.Names index and the run
-//   --no-values  do not descend into closure environments and values
+//   --values     descend into closure environments and values (OFF by default:
+//                descending is what makes a dump 1.7 MB and unreadable)
+//   --no-values  accepted for backwards compatibility; it is already the default
+//   --max-bytes N stop printing once N bytes have been emitted and append a visible
+//                truncation marker (default 200000)
+//
+// Both `--flag N` and `--flag=N` are accepted.
 using Quill.Compiler;
 using Quill.Kernel;
 
@@ -16,6 +23,7 @@ var file = args.FirstOrDefault(a => !a.StartsWith("--"));
 var expand = args.Contains("--expand");
 var noRun = args.Contains("--no-run");
 var depth = Arg(args, "--depth") is { } d ? int.Parse(d) : 60;
+var maxBytes = Arg(args, "--max-bytes") is { } mb ? int.Parse(mb) : 200_000;
 
 var source = File.ReadAllText(file!);
 var units = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -28,7 +36,9 @@ Elaborated program;
 try { program = Driver.Elaborate(source, units); }
 catch (Exception e) { Console.WriteLine($"ELABORATION FAILED: {e.Message}"); return 1; }
 
-var p = new Printer(expand, depth, !args.Contains("--no-values"), program.Context);
+// Values are OFF by default: descending into closure environments is what turns a
+// small term dump into 1.7 MB. --values opts back in. --no-values is still accepted.
+var p = new Printer(expand, depth, args.Contains("--values"), maxBytes, program.Context);
 
 if (args.Contains("--type"))
 {
@@ -74,18 +84,28 @@ return 0;
 
 static string? Arg(string[] args, string flag)
 {
-    var a = args.FirstOrDefault(x => x.StartsWith(flag));
-    if (a is null || a.Length <= flag.Length) return null;
-    var v = a.Substring(flag.Length).TrimStart('=');
-    return v.Length > 0 ? v : null;
+    for (var i = 0; i < args.Length; i++)
+    {
+        var a = args[i];
+        if (!a.StartsWith(flag)) continue;
+        if (a.Length > flag.Length)
+        {
+            var v = a.Substring(flag.Length).TrimStart('=');
+            if (v.Length > 0) return v;
+        }
+        if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) return args[i + 1];
+    }
+    return null;
 }
 
 /// <summary>Indented pretty-printer for terms, values and decision trees.</summary>
-sealed class Printer(bool expand, int maxDepth, bool values, Context context)
+sealed class Printer(bool expand, int maxDepth, bool values, int maxBytes, Context context)
 {
     private readonly System.Text.StringBuilder _sb = new();
     private readonly HashSet<object> _seen = new(ReferenceEqualityComparer.Instance);
     private int _level;
+    private int _bytes;
+    private bool _byteStopped;
 
     public string Text => _sb.ToString();
 
@@ -120,9 +140,20 @@ sealed class Printer(bool expand, int maxDepth, bool values, Context context)
 
     public void Line(string s = "")
     {
+        if (_byteStopped) return;
+        var text = s.Length > 0 ? new string(' ', _level * 2) + s : "";
+        _bytes += System.Text.Encoding.UTF8.GetByteCount(text) + 1;
+        if (_bytes > maxBytes)
+        {
+            // Truncation must be visible, never silent: a reader who sees a short
+            // dump has to know whether it is the whole thing.
+            _byteStopped = true;
+            Truncated = true;
+            _sb.AppendLine($"… truncated at {maxBytes} bytes; raise --max-bytes or lower --depth");
+            return;
+        }
         if (_lines++ > LineCap) { if (_lines == LineCap + 1) _sb.AppendLine("… line cap reached, output truncated"); return; }
-        if (s.Length > 0) _sb.Append(new string(' ', _level * 2));
-        _sb.AppendLine(s);
+        _sb.AppendLine(text);
     }
 
     private void Nest(Action body) { _level++; body(); _level--; }
