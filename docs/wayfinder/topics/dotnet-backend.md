@@ -80,6 +80,39 @@ stack. Nothing in the suite recurses deeper than 200 k (the deepest literal in a
 which stays on the interpreter), so no case is expected to flip — but the language's guarantee
 is weaker afterwards.
 
+### What F# does, measured on this machine (2026-10-13)
+
+F# compiles to the same runtime and is the closest precedent, so it was measured rather than
+recalled. Two mechanisms, not one, and `--tailcalls-` separates them:
+
+| F#, 20 M deep | `tail.` ON | `tail.` OFF (scan: 0 prefixes) |
+| --- | --- | --- |
+| self tail | ok | **ok** — a loop, no `tail.` involved |
+| mutual tail | ok | **overflow, 300 k** |
+| higher-order: tail call to a function value that calls back | ok | **overflow, 300 k** |
+| non-tail | overflow | overflow |
+
+The IL scan of the ON build finds four `tail.` prefixes: `Even`, `Odd`, `ThroughValue`, and
+`Invoke` — F# synthesizes the closure's `Invoke` and puts the `tail.` inside it, which is how a
+tail call to an *unknown* callee stays unbounded. ROSLYN HAS NO SYNTAX FOR THAT CALL SITE.
+
+Citations, from `dotnet/fsharp` (`src/Compiler/…`): loop conversion is `IlxGen.fs:4586`
+(`// Look for tailcall to turn into branch`, `I_starg` back to the entry slots), restricted to
+values in the same closure/method; everything else in tail position goes through `CanTailcall`
+(`IlxGen.fs:4958-4988`) and the `tail.` prefix is written at `ilwrite.fs:1928`. It is
+**best-effort, not a language guarantee** — no `tail.` inside `try`/`finally`, with pinned or
+byref locals, or in a struct-arg call — and calls through function values are *assumed* critical
+(`Optimizer.fs:4403`). `emitTailcalls` (`CompilerConfig.fs:809`, `--tailcalls-`) is read only by
+the IL writer, which is why the self-tail loop survives the flag (measured above).
+
+**So the general case is not reachable from C# source emission.** The two C#-expressible
+substitutes are: a self-tail `while` loop (free, covers F#'s cheapest case), and a
+trampoline/TailCall sentinel for tail positions whose callee is unknown (covers the other two,
+at the price of a calling-convention change or a wrapper on every tail-calling function).
+Real `tail.` — including F#'s `Invoke` trick — requires emitting IL, which is a second backend,
+not a flag. **Open, to be ruled.**
+
+
 ## The finding that sequences the typed tier: `Core.term` is untyped
 
 `Lam(Term Body)` (`Core.cs:19`) and `Ap(Term Fn, Explicitness, Term Arg)` (`Core.cs:20`) carry
@@ -140,13 +173,46 @@ Each slice is separately verifiable and leaves the previous one working.
 
 ## Open
 
-- **Runtime type representation (slice 1e).** Because type-case executes (`DecisionTree.TypeSwitch`,
-  `Nbe.Match.cs:93-120`) and generative identity is ref-cell reference identity
-  (`Nbe.Generative.cs:79`), the typed tier needs a runtime descriptor for type values and a
-  machine encoding for stamps. Named here; not designed yet.
-- **Effects under direct style (slice 1d).** `resume` re-pushes a captured `Kont` slice
-  (`Nbe.Effects.cs:120`) and is one-shot by choice. Direct-style alternatives are `async`/await
-  state machines for effectful arrows only (`~>` pure versus `->{Log}` is statically known), or
-  keeping a trampoline for effectful code. Undecided.
-- **Whether the depth guard is a language rule.** Its ceiling is an implementation constant;
-  if the language is to promise anything, the constant needs to be normative.
+**The two live choices are written up as a reading document**:
+[the two choices still open](dotnet-backend-choices.md) — option-by-option, with the emitted shapes
+for a verified effect program and what each costs. It also records what today's pivot to IL does
+to work already done. Summary of what is open, with the reading doc as the detail:
+
+- **Effectful code**: machine only where the effect row needs it (recommended), machine plus a
+  tail sentinel inside it, a universal machine, or CPS with a continuation object.
+- **IL generation**: `Reflection.Emit` + `PersistedAssemblyBuilder` (recommended, since
+  `OpCodes.Tailcall` is the whole point) or a raw `System.Reflection.Metadata` PE writer.
+
+### 1. Tail-call strategy — ruled 2026-10-13: emit IL
+
+F# covers the general case with a `tail.` prefix at the delegate-`Invoke` site, which C# cannot
+express (section above). Three C#-expressible answers, with what each actually buys:
+
+| option | covers | cost |
+| --- | --- | --- |
+| **self-tail `while` loop only** (today's slice 1a + a loop pass) | self tail | free; mutually recursive and higher-order tail calls stay stack-bounded |
+| **TailCall sentinel + trampoline** | all three shapes | a wrapper/dispatch loop on every tail-calling function, and one allocation per unknown-callee tail call; C#-only |
+| **an IL tier emitting real `tail.`** | all three, F#'s exact coverage | a second emitter (IL, not C#) — the C# assembly would have to be emitted as IL too, or post-processed |
+
+### 2. Effects under direct style (slice 1d)
+
+`resume` re-pushes a captured `Kont` slice (`Nbe.Effects.cs:120`) and is one-shot by choice, so
+it fits a state machine well (nothing needs cloning). F#'s shipped shape is the reference and is
+worth copying rather than inventing: **one struct machine per computation, `int` program
+counters, a single `switch` on the resumption point at `MoveNext` entry, and locals hoisted to
+machine fields only when they are live across a suspension** — `ResumableStateMachine<'Data>`
+(`FSharp.Core/resumable.fsi:11-31`), the jump table at `LowerStateMachines.fs:934-946`, and
+`__resumeAt` becoming a goto (`:602-620`). F# also **refuses** shapes rather than transforming
+them: resumption inside `try/finally` or a handler is an error (`:693-696`, `:756`).
+
+The decisive precedent for quill: F# did **not** compose the two mechanisms — the runtime-async
+path sets `tail.` emission off rather than solving tail calls inside the machine
+(`docs/runtime-async.md:53,358`; `IlxGen.fs:4971`). So this is a real fork, not a detail: either
+the state machine is entered only where an effect row makes it necessary (leaving pure code
+JIT-friendly), or it is universal and the 4000x ceiling is spent on it.
+
+### 3. Whether the depth guard is a language rule
+
+Its ceiling is an implementation constant; if the language is to promise anything, the constant
+needs to be normative. It becomes moot if either option in (1) that covers the general case is
+taken.
