@@ -1,6 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Quill.Backend\Quill.Backend.csproj" />
     <ProjectReference Include="..\..\src\Quill.Compiler\Quill.Compiler.csproj" />
   </ItemGroup>
 

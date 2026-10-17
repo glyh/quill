@@ -4,6 +4,7 @@
 // 2026-09-25), which is why it lives beside the case files in test/ rather than under
 // src/, the implementation tree. See ../conformance/cases/README.md.
 using System.Diagnostics;
+using Quill.Backend;
 using Quill.Compiler;
 
 const string UnitInfix = ".unit-";
@@ -25,6 +26,12 @@ if (args is ["--case", var casePath])
     Console.WriteLine($"FAIL {why}");
     return 1;
 }
+
+// --parity: run every case whose .expect is not "ok" through Backend.Run beside
+// Driver.Run and report match / differ / not-ported. It is the backend slice's
+// evidence, not a pass/fail gate, so it never changes the default mode's verdict.
+if (args.Contains("--parity"))
+    return RunParity(CasesRoot([.. args.Where(a => a != "--parity")]));
 
 // prototype-divergences.txt is historical now (the second implementation is gone); the
 // cases it lists are ordinary ones, and this runner passes every case in the directory.
@@ -151,6 +158,52 @@ static (string Line, int Exit) RunChild(string path)
     if (line is null) line = child.StandardError.ReadToEnd().Trim();
     return (line ?? "", exit);
 }
+
+// --parity: the backend's coverage beside the interpreter. Each case whose .expect is not
+// "ok" is elaborated once and run twice -- Driver.Run and Backend.Run -- and the outcomes
+// compared. "not ported" is the backend's deliberate NotImplementedException; a case whose
+// elaboration fails is a match, because neither path ever runs. A compile failure is a
+// BackendException (an emitter bug), and counts as a differ, never as a language error.
+static int RunParity(string root)
+{
+    int match = 0, differ = 0, notPorted = 0;
+    var examples = new List<string>();
+    foreach (var path in EnumerateCases(root))
+    {
+        var dir = Path.GetDirectoryName(path)!;
+        var name = Path.GetFileNameWithoutExtension(path);
+        if (File.ReadAllText(Path.Combine(dir, name + ".expect")).Trim() == "ok") continue;
+        var units = UnitSources(dir, name);
+        Elaborated elaborated;
+        try { elaborated = Driver.Elaborate(File.ReadAllText(path), units); }
+        catch (Exception) { match++; continue; }
+        var interpreted = Outcome(() => Driver.Describe(Driver.Run(elaborated)));
+        var compiled = Outcome(() => Backend.Run(elaborated));
+        if (compiled.Error is NotImplementedException) { notPorted++; continue; }
+        if (Same(interpreted, compiled)) { match++; continue; }
+        differ++;
+        if (examples.Count < 10)
+            examples.Add($"{Path.GetRelativePath(root, path)}\n      interpreter: {Show(interpreted)}\n      backend:     {Show(compiled)}");
+    }
+    foreach (var example in examples) Console.WriteLine($"DIFFER {example}");
+    Console.WriteLine($"parity: {match + differ + notPorted} cases, {match} match, {differ} differ, {notPorted} not ported");
+    return 0;
+}
+
+// One path's outcome: the value it produced, or the exception it threw.
+static (string? Value, Exception? Error) Outcome(Func<string> run)
+{
+    try { return (run(), null); } catch (Exception e) { return (null, e); }
+}
+
+// Two outcomes agree when both produced the same value, or both failed as a language
+// error (the suite never compares error messages, only that a language error happened).
+static bool Same((string? Value, Exception? Error) a, (string? Value, Exception? Error) b) =>
+    a.Error is null && b.Error is null ? a.Value == b.Value
+    : a.Error is FunException && b.Error is FunException;
+
+static string Show((string? Value, Exception? Error) outcome) =>
+    outcome.Error is { } e ? $"{e.GetType().Name}: {e.Message}" : outcome.Value ?? "";
 
 // test/conformance/cases, found by walking up to the repo root, so the runner works from
 // anywhere. An argument overrides it; --isolated is a mode flag, not a directory.
