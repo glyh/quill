@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Quill.Backend/Quill.Backend.csproj" />
     <Project Path="src/Quill.Cli/Quill.Cli.csproj" />
     <Project Path="src/Quill.Compiler/Quill.Compiler.csproj" />
     <Project Path="src/Quill.Expand/Quill.Expand.csproj" />
