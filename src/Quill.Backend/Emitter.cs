@@ -196,6 +196,10 @@ internal sealed class Emitter
 
     private Cty EmitLam(Term.Lam lam, Cty expected, Scope scope, Ctx ctx)
     {
+        // shortcut: an unannotated lambda falls back to an object-shaped delegate, because
+        // Core.term carries no domain for Lam and no annotation table exists yet. Upgrade when
+        // docs/wayfinder/tickets/elaborator-records-term-types.md lands, at which point every
+        // lambda here has a written or recovered signature.
         var fn = expected as Cty.Fn ?? Cty.ObjFn;
         var method = EnsureLambda(lam, fn, scope);
         ctx.Il.Emit(OpCodes.Ldnull);

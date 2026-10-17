@@ -66,6 +66,22 @@ program can be built and run as a .NET artifact, not only interpreted through Nb
 
 ## Ruling 2 — later on 2026-10-13: emit IL, and the effect tier
 
+**Slice 1a′ landed the same day** (`95a5249` skeleton, `c472730` salvage, `cb25159` emitter,
+`70c0314` IL-debug hook; merged into `main`). Verified by the integrator on the merged tree rather
+than taken from the fork's report: build clean, **xUnit 217**, **conformance 967 cases / 0 failed**,
+parity **900 cases, 352 match, 0 differ, 548 not ported**, all five acceptance programs correct, and
+the pivot test — 20 M-deep self-tail and mutual-tail recursion — returns `0` and `1` with exit 0 in
+701 ms and 586 ms. The `tail.` prefix is really emitted: a byte-scan of the image finds **1**
+occurrence (self) and **4** (mutual), and a `QUILL_BACKEND_IL` hook writes the image out for that
+purpose (`Emitter.cs:119`). One scope deviation was ruled acceptable and is now written into the
+staging table: 1a′ carries the single `Switch { At = Base }` literal-`I64` match shape, because
+`if` is a macro over `Match` and the 20 M probe is otherwise unwritable.
+
+**A fork's "merge with" line is a claim, not a fact.** The 1a′ fork reported its branch as
+`fork/backend-slice-1a`; that name still belonged to the dead **Roslyn** branch, whose `Emitter.cs`
+imports `System.Text` and builds C# text. Merging as instructed would have landed exactly the code
+the pivot deleted. The IL commits were on `pi-agent-d558421f-a5d1-474`. Check the ref before merging.
+
 The ruling below was **superseded on its first point the same day**: the target is **IL**, not C#
 source. Reason, measured rather than argued: F# covers mutual and higher-order tail calls with a
 `tail.` prefix (inside the closure's `Invoke` method for the higher-order case), and with

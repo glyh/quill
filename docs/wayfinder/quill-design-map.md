@@ -147,6 +147,11 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   is the elaborator's normalizer, the import evaluator and the macro runtime. Alternatives and
   emitted shapes: [the two choices](topics/dotnet-backend-choices.md); what the term looks like to
   an emitter: [the term shapes](topics/dotnet-backend-term-shapes.md).
+  **Slice 1a′ landed 2026-10-17** — IL emitter for atoms/primitives/`Var`/`Let`/`Lam`/`Ap`/`Fix`
+  plus the one literal-`Switch` match shape, `quill run`, and a `--parity` mode; verified on the
+  merged tree at xUnit 217, conformance 967/0, parity **352 match / 0 differ / 548 not ported**, and
+  20M-deep self and mutual tail recursion both surviving with `tail.` really emitted (1 and 4
+  prefixes byte-scanned out of the image).
 - [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
   — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
   annotation table exists, so a typed emitter only gets the signatures the surface wrote

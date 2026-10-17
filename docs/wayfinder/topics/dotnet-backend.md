@@ -172,13 +172,24 @@ Each slice is separately verifiable and leaves the previous one working.
 
 | slice | contents | acceptance |
 | --- | --- | --- |
-| 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions `CanTailcall`-style checks accept | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive |
-| 1b | `Match` over `DecisionTree`s, and prelude-function compilation from the value graph | `fib(30)` → `832040`, and faster than the 13.6 s baseline |
+| 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; **plus the one `Match` shape a recursion probe cannot be written without** (below); `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions a `CanTailcall`-style check accepts | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive. **Landed 2026-10-17:** all met, verified on the merged tree — `tail.` prefixes 1 (self) and 4 (mutual) in the emitted image, both 20M runs exit 0 |
+| 1b | the rest of `Match` over `DecisionTree`s (payload bindings, nominal keys, `Destruct`, `TypeSwitch`, guards, non-base occurrences), and prelude-function compilation from the value graph | `fib(30)` → `832040`, and faster than the 13.6 s baseline |
 | 1c | `Con`/nominal/struct/record/tuple, `Open`, `Proj`/`Dot` | the `values/` match/struct/record population matches the interpreter |
 | 1d | refs (`VRef`, `RefCell`), effects: the machine for arrows whose row is non-empty, `perform` handing it the machine, `resume` re-entering at its state, one-shot enforced by clearing it | the 43 ref and 55 effect cases, including `core-098` (43), `core-049` (5) and `ref-nbe-continuation-used` (still `error`) |
 | 1e | traits/dictionaries, type-case, generative stamps | the remaining type-case cases |
 | 1f | the elaboration-time annotation pass; typed emission everywhere | typed tier; `--backend dotnet` becomes the default in the runner |
 | 2 | `quill build` writing the assembly `PersistedAssemblyBuilder` produces; delete `Driver.Run` as a program path | the binary is the artifact |
+
+**The match shape 1a′ carries, and why it is not 1b's.** `if (c) { … } else { … }` is not a term: it
+is a syntax macro (`std/lib.qll:14`) that lowers to `Match` over `Bool`. So *any* terminating
+recursion needs a `Match`, which means the slice's own acceptance test — a 20M-deep tail probe — is
+unwritable without one. 1a′ therefore compiles exactly `Switch { At = Base }` with **literal
+`Atom.I64` keys and leaf arms with no bindings** (`Emitter.cs:320-379`), and refuses everything else
+with `not ported yet: backend decision tree`. Ruled 2026-10-17: keep it in 1a′, because the
+tail-position arm emission it exercises is the subtle part and 1b would otherwise rewrite it; 1b
+inherits it as tested rather than re-deriving it. The staging table originally got this wrong by
+listing `Match` wholly under 1b while asking for a probe that requires it — recorded here so the next
+reader does not re-litigate it.
 
 Slice 1a (Roslyn, C# source) is **superseded before merge** — its `Runtime.cs`, CLI and parity
 harness are salvaged into 1a′, and its C#-text emitter is dropped, since nothing would run it.
