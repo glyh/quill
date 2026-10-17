@@ -134,20 +134,25 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   [`CONTEXT.md`](../../CONTEXT.md).
 
 ### Backend and execution
-- [A .NET backend](topics/dotnet-backend.md) — **decided 2026-10-13**: emit **C#** and compile it
-  in-process with Roslyn, value model **native .NET types** (`long`, generated classes per
-  nominal, real delegates), recursion **direct style on the CLR stack with a depth guard**, and
-  slices accepted by diffing `Backend.Run` against `Driver.Run` over the 651 value-producing
-  cases. Proven with probes: the interpreter's `fib(30)` is **13.6 s** against **3.4 ms** for the
-  same program as C#, C# **cannot** emit tail calls (the JIT loop-converts nothing; ~250-280 k
-  frames then a process-killing overflow), and the prelude arrives inside the program term as a
-  `Let`-bound `Module` whose members are reached by de Bruijn index — so the emitter compiles a
-  (term, value-environment) pair, not a term. The interpreter is **not** deleted: it is the
-  elaborator's normalizer, the import evaluator and the macro runtime.
+- [A .NET backend](topics/dotnet-backend.md) — **decided 2026-10-13**, and re-decided the same day
+  on its target: the backend **emits IL** (`System.Reflection.Emit` + `PersistedAssemblyBuilder`),
+  not C# source, because F#'s coverage of mutual and higher-order tail calls rests on the `tail.`
+  prefix and C# has no syntax for it — measured: with `--tailcalls-` both shapes die at 300k frames
+  with exit 134, while self tail survives as a loop with zero prefixes. Value model **native .NET
+  types**; effectful code **a state machine only where the effect row needs it** (accepted limit: a
+  tail call inside a machine consumes CLR stack, because `tail.` is illegal there — F# turned tail
+  emission off in its async path rather than solving it); slices accepted by diffing `Backend.Run`
+  against `Driver.Run` over the value-producing cases. Baseline measured: interpreter `fib(30)`
+  **13.6 s** against **3.4 ms** for the same program as C#. The interpreter is **not** deleted — it
+  is the elaborator's normalizer, the import evaluator and the macro runtime. Alternatives and
+  emitted shapes: [the two choices](topics/dotnet-backend-choices.md); what the term looks like to
+  an emitter: [the term shapes](topics/dotnet-backend-term-shapes.md).
 - [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
   — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
   annotation table exists, so a typed emitter only gets the signatures the surface wrote
   (`rec fib : I64 -> I64` arrives typed through `Let.Type`; `(fn(x) { x + 1 })(7)` does not).
+  The keying decision (node identity, not structure, with the collision argument) is made and
+  documented; the recording is still incomplete.
 
 ### Macro system
 - [Design type-aware macro interleaving handshake](tickets/design-type-aware-macro-interleaving.md)
@@ -371,9 +376,29 @@ as the frontier reaches them.
 ### Frontier (2026-09-26 → 2026-10-13)
 
 **2026-10-13 — 17 open** (`dotnet-backend` stays open as a container, like the three port
-umbrellas; one ticket filed, none closed). Suite at HEAD `9987932` unchanged by this session —
+umbrellas; one ticket filed, none closed). Suite at HEAD unchanged by this session's docs work —
 nothing under `src/`, `std/` or `test/` was edited, so the counts below are the map's own
-2026-10-04 run, not a re-measurement.
+2026-10-04 run, not a re-measurement. **Re-decided later the same day:** the backend's target is
+**IL**, not C# source — see the Backend and execution entry under *Decisions so far* for the
+measurement that forced it (F# needs `tail.` for mutual and higher-order tail calls; C# cannot
+write it; with `--tailcalls-` both shapes die at 300 k frames).
+
+- **Three fork branches were verified by me, not believed.** `fork/backend-slice-1a` (a Roslyn
+  slice 1a, now dead on its target but green): 967 cases 0 failed, xUnit 217, and its parity
+  harness reports **900 cases, 359 match, 0 differ, 541 not ported** — a partial backend that never
+  once disagreed where it covered, which is the bar the IL slice inherits. `fork/elaborator-records-term-types`:
+  967 / 0 and xUnit **218**, but **incomplete** (only three partials have recording call sites; its
+  last act was to announce starting the rest) and carrying a scratch probe promoted to a test that
+  writes `/tmp/probe-dump.txt` and asserts nothing. The survey fork wrote no document at all.
+- **Salvaged from the two failures rather than discarded:** `tools/Quill.DumpTerm` (511 lines,
+  prints the elaborated term and `Context.Environment` as de Bruijn indices with types — the
+  instrument the emitter forks were missing) joined the solution so it cannot rot, and the term
+  shapes that were actually dumped are written down in
+  [the term-shapes topic](topics/dotnet-backend-term-shapes.md), with the rest listed as open.
+  From the dead Roslyn branch: `Runtime.cs`, the CLI and the parity harness.
+- **Two forks are running on the re-cut work**: slice **1a′** (IL emission, with a 20M-deep mutual
+  tail pair as the acceptance test that proves `tail.` actually works) and the finisher for the
+  annotation pass. Both use a different agent type than the one whose provider hit its usage limit.
 
 - **[A .NET backend](tickets/dotnet-backend.md) is ruled.** Four answers, recorded on the ticket
   and detailed in [its topic doc](topics/dotnet-backend.md): emit **C#** compiled in-process with
