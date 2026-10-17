@@ -64,7 +64,45 @@ program can be built and run as a .NET artifact, not only interpreted through Nb
 4. **Does a backend sharpen the content-addressed codebase fog item?** A persistent store pays
    off more when there is a build to cache — compile time is that item's sharpening condition.
 
+## Ruling — 2026-10-13
+
+Option **(c) over the host**, in its cheapest form: **emit C#, compile in-process with Roslyn**,
+value model **native .NET types** (`long`, generated classes per nominal, real delegates),
+recursion **direct style on the CLR stack with a depth guard**, and the first slice accepted by
+**running the 651 value-producing cases through `Backend.Run` beside `Driver.Run` and diffing the
+`VALUE` lines.** Detail, evidence and staging: [a .NET backend](../topics/dotnet-backend.md).
+
+Answers to the four questions:
+
+1. **(c)** — a code generator over the host. Collector question (2) dissolves: the host has one.
+2. **The CLR's GC.** No collector is written.
+3. **Still open, and now scoped to slice 1d.** Effects are 55 of the 418 `values/` cases.
+   `resume` re-pushes a captured `Kont` slice (`Nbe.Effects.cs:120`) and is one-shot by choice;
+   the direct-style options are `async`/`await` state machines for effectful arrows only, or a
+   trampoline kept for effectful code. The ideas doc's evidence-passing note is about routing,
+   which the term already does (`Core.Tunnel`), not about `resume`.
+4. **Yes, but not yet.** The interpreter baseline is now measured (`fib(30)` = 13.6 s against
+   3.4 ms for the same program as C#), so compile time is no longer unmeasured; a persistent
+   store still waits for a *build* to cache, which slice 2 produces.
+
+**What the ruling does not do:** delete `Nbe`. The evaluator is the elaborator's normalizer
+(`Elaborator.cs:93`), evaluates every import (`Loader.cs:130`) and every std unit
+(`Prelude.cs:86`), and runs macros. The backend replaces the *program execution* path
+(`Driver.Run`), which is what `src/Quill.Cli` will drive.
+
+**Two findings that change the shape of the work, both probed rather than assumed:**
+
+- **C# cannot emit tail calls** (`.NET 10.0.112`, x64, `-c Release`: self tail recursion overflows
+  at ~250-280 k frames, mutual tail and non-tail at the same order; the JIT loop-converts nothing).
+  Direct style therefore needs the depth guard, and TCO needs either explicit loop emission or a
+  `tail.`-prefixed IL tier.
+- **`Core.term` is untyped** — `Lam(Term Body)` has no domain and no annotation table exists. So
+  the typed tier has a prerequisite: an elaboration-time node → type side table. Slice 1 emits
+  typed signatures only where the term carries one (`Let.Type`, so `rec fib : I64 -> I64` is typed)
+  and `object` elsewhere; the rest is [the annotation pass](elaborator-records-term-types.md).
+
 ## Sharpens when
 
 Someone wants to run a `quill` program outside the interpreter — a binary, a library, or an FFI
-consumer — and the interpreter is not enough.
+consumer — and the interpreter is not enough. **Sharpened 2026-10-13**, and the consumer is the
+user: hand optimization to the host and drop the interpreter as the execution path.

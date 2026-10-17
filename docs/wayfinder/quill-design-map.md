@@ -133,6 +133,22 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   enforced or decided-not-implemented. Vocabulary in the root
   [`CONTEXT.md`](../../CONTEXT.md).
 
+### Backend and execution
+- [A .NET backend](topics/dotnet-backend.md) — **decided 2026-10-13**: emit **C#** and compile it
+  in-process with Roslyn, value model **native .NET types** (`long`, generated classes per
+  nominal, real delegates), recursion **direct style on the CLR stack with a depth guard**, and
+  slices accepted by diffing `Backend.Run` against `Driver.Run` over the 651 value-producing
+  cases. Proven with probes: the interpreter's `fib(30)` is **13.6 s** against **3.4 ms** for the
+  same program as C#, C# **cannot** emit tail calls (the JIT loop-converts nothing; ~250-280 k
+  frames then a process-killing overflow), and the prelude arrives inside the program term as a
+  `Let`-bound `Module` whose members are reached by de Bruijn index — so the emitter compiles a
+  (term, value-environment) pair, not a term. The interpreter is **not** deleted: it is the
+  elaborator's normalizer, the import evaluator and the macro runtime.
+- [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
+  — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
+  annotation table exists, so a typed emitter only gets the signatures the surface wrote
+  (`rec fib : I64 -> I64` arrives typed through `Let.Type`; `(fn(x) { x + 1 })(7)` does not).
+
 ### Macro system
 - [Design type-aware macro interleaving handshake](tickets/design-type-aware-macro-interleaving.md)
   (closed & **implemented**) — semantic module driver with an explicit ordered
@@ -352,7 +368,35 @@ as the frontier reaches them.
 
 ## Open questions
 
-### Frontier (2026-09-26 → 2026-10-04)
+### Frontier (2026-09-26 → 2026-10-13)
+
+**2026-10-13 — 17 open** (`dotnet-backend` stays open as a container, like the three port
+umbrellas; one ticket filed, none closed). Suite at HEAD `9987932` unchanged by this session —
+nothing under `src/`, `std/` or `test/` was edited, so the counts below are the map's own
+2026-10-04 run, not a re-measurement.
+
+- **[A .NET backend](tickets/dotnet-backend.md) is ruled.** Four answers, recorded on the ticket
+  and detailed in [its topic doc](topics/dotnet-backend.md): emit **C#** compiled in-process with
+  **Roslyn**; value model **native .NET types**; acceptance for slice 1 is **`Backend.Run`
+  diffed against `Driver.Run`** over the 651 value-producing cases; recursion **direct style with
+  a depth guard**. The ticket's "compile time is unmeasured" premise is now measured: `fib(30)`
+  takes **13.6 s** through the interpreter and **3.4 ms** as C#, against a 0.54 s whole-program
+  floor (0.19 s of it `dotnet` startup).
+- **Two probes decided more than the ruling did, and both went against the convenient answer.**
+  (1) **C# cannot emit tail calls** — the CLR's `tail.` prefix is real but Roslyn never emits it,
+  and the JIT did not loop-convert even the textbook self-tail shape (ok at 250 k frames,
+  stack overflow at 280 k, exit 134, uncatchable) — so "hand optimization to dotnet" buys speed
+  but not unbounded recursion, which is a **language-semantics change** the topic doc states
+  plainly. (2) **`Core.term` is untyped**: `Lam(Term Body)` has no domain and no annotation table
+  exists, so the typed tier has a prerequisite, filed as
+  [the elaborator records a type for every term](tickets/elaborator-records-term-types.md) —
+  slice 1 emits typed signatures only where the term carries one.
+- **The emitter's input is a (term, value-environment) pair, not a term** — dumped, not assumed:
+  the program arrives as `Let{ Def = Module{… the whole prelude …}, Body = … }`, its members are
+  reached by de Bruijn index, and indices past it land on primitives in the base context. So
+  prelude functions, trait dictionaries and structured records reach the emitter as *values* with
+  terms inside them, which is where the closure conversion happens and why the prelude needs no
+  special case.
 
 **2026-10-04 — 16 open**, suite **967 cases, 0 failed, xUnit 217/217** (the integrator's own run on the
 merged `f63047d`). Five tickets the paragraph below counts as open were **stale rather than open**, one
