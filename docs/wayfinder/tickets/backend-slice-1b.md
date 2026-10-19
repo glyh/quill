@@ -66,16 +66,31 @@ running.
 
 ## Acceptance
 
-- `fib(30)` → **`832040`** through `Backend.Run`, and faster than the 22.5 s the interpreter
-  takes on this machine (measured today; the topic doc's 13.6 s baseline was a different host).
-- `{ 5 <= 6 }` → **`True`** — `Driver.Describe` renders a `VCon` by its **name**
-  (`Driver.cs:69-74`), not as an `I64`; measured with `--file`, which prints `VALUE True`. So the
-  backend's `Runtime.Describe` must render a `Bool` constructor the same way, or this case becomes
-  a `differ` even though the emitter is correct.
-- `{ 1 == 1 }` either works or still refuses **only** on `implicit application`, which is 1e.
-- `--parity`: **differ stays 0**. `not ported` must fall, and the fork reports the new
-  value-match / both-errored / both-elab-failed split, not just the total.
-- Suite unchanged at **967 cases, 0 failed**; xUnit at 217, or more with a new test.
+**Two gates, one per half — the halves are independent and the original single gate was
+wrong.** Measured 2026-10-19 at `e1b951a`: the `fib(30)` gate was **already met before 1b
+started**, by the `match` spelling rather than the `if` one.
+
+**1b-ii (Match).** `{ rec fib : I64 -> I64 = fn(n) { match (n) { 0 => 0, 1 => 1, _ => fib(n - 1) +
+fib(n - 2) } }; fib(30) }` → **`832040` through `Backend.Run` in 0.6 s**, against **7.2 s** for the
+interpreter on this machine (three runs, same answer each time). Yes, this passes today — so
+1b-ii is measured by *coverage*, not by this case: the `if` spelling
+(`… fn(n) { if (n < 2) { n } else { … } }`) is refused `not ported yet: backend decision tree`,
+as is every constructor match:
+
+- `{ Color = enum { Red, Green }; open Color; match (Color.Green) { Red => 1, Green => 2 } }` →
+  expects **`2`**; currently `not ported yet: backend Nominal`.
+- The `Red` variant → expects **`1`**.
+
+**1b-i (prelude value graph).** `{ 5 <= 6 }` → **`True`**, currently `not ported yet: backend
+prelude value`. Note the rendering: `Driver.Describe` prints a `VCon` by its **name**
+(`Driver.cs:69-74`), not as an `I64` — measured with `--file`, which prints `VALUE True`. So the
+backend's `Runtime.Describe` must render a `Bool` constructor the same way, or this case becomes a
+`differ` even though the emitter is correct. Also expected: `{ min(3, 4) }` → **`3`**,
+`{ abs(0 - 5) }` → **`5`**, `{ max(2, 9) }` → **`9`**.
+
+**Both halves.** `--parity`: **differ stays 0**; `not ported` falls and the fork reports the new
+value-match / both-errored / both-elab-failed split, not just the total. Suite unchanged at **967
+cases, 0 failed**; xUnit at 217, or more with a new test.
 
 ## Not in this slice
 
@@ -85,6 +100,14 @@ refused here.
 
 ## Sharpens when
 
-The value-graph walk (finding 1) and the decision-tree walk (finding 2) are independent of each
-other but share `Emitter.cs`'s `Scope`/`Ctx` plumbing, so they are one fork rather than two —
-a second fork on the same file would only rebase.
+**Measured 2026-10-19 — the two halves are severable, and the first attempt failed by ignoring
+that.** The value-graph walk (finding 1) and the decision-tree walk (finding 2) share only
+`Emitter.cs`'s `Scope`/`Ctx` plumbing, no data structure. `fib(30)` passing today by the `match`
+spelling while the `if` spelling and every constructor match are refused is the proof: **1b-ii is
+reachable with no prelude-value work at all**, and 1b-i with no `Match` work at all.
+
+So they are **two forks, not one** — and the first attempt (one fork, both halves) burned its
+turn limit on reconnaissance and landed zero implementation. `Tools/Quill.DumpTerm` gained
+`--ambient=N` (the index space the emitter's `Var` actually uses, which `--env=N` cannot reach
+past the context width) and a real crash fix in the same session, at `e1b951a`; those are the
+instruments both forks should start from.
