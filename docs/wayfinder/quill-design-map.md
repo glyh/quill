@@ -414,6 +414,22 @@ Slice **1a′** landed 2026-10-17 and one ticket was filed:
   `Emitter.cs` and are named by no slice of the staging table, yet `Module` is the largest
   first-failure bucket — and since the whole prelude arrives as one `Module`, every later slice
   meets it.
+- **Slice 1b-ii landed 2026-10-19** (merged `926eb49`): the `Match` walk over `DecisionTree`s —
+  `Destruct`, payload/child/field occurrences, guards — in `src/Quill.Backend/Emitter.Match.cs`.
+  Verified by the integrator, not the fork: 967/0, xUnit 217, parity **355 match / 0 differ**,
+  value-match **111 → 114**, and `decision tree` refusals **106 → 17** (the remaining 17 are
+  `Sequential` 14 and `TypeSwitch` 3, both deliberately out). The +3 is the honest number and the
+  reason is the next finding.
+- **A `Destruct` cannot run without a constructor *value*, so 1b's halves are coupled by their
+  gates even though the code is severable.** Proven by ablation, not argument: with
+  `EmitDestruct`'s body replaced by a throw, **6 cases land on it** with the standard
+  `cases=2 at=Base` shape and then re-block at `backend prelude value`. The coupling is hidden by
+  check order — `EmitMatch` validates the tree at `Emitter.cs:326` *before* emitting the scrutinee
+  — so `{ match (True) { … } }` reports `decision tree` while `{ x = True; match (x) { … } }`
+  reports `prelude value`; same missing prerequisite, two messages. **So the constructor value
+  representation is the shared prerequisite: 1b-i builds it, 1b-ii branches on it, and until it
+  lands no constructor gate in either half can pass.** `{ rec fib … if … }` therefore stops at
+  `prelude value` today rather than at the tree, exactly as the ticket predicts.
 - **`elaborator-records-term-types` merges green and pays off nothing yet.** Verified by merging
   `fork/elaborator-records-term-types` into a scratch worktree and running it: 967/0, xUnit 217,
   parity unchanged. Its hole table reproduces (`Fix` 0/1 and 0/2, `Lam` 0/2, `Struct` 1/3). Its own
