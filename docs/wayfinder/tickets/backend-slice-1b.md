@@ -100,14 +100,38 @@ refused here.
 
 ## Sharpens when
 
-**Measured 2026-10-19 — the two halves are severable, and the first attempt failed by ignoring
-that.** The value-graph walk (finding 1) and the decision-tree walk (finding 2) share only
-`Emitter.cs`'s `Scope`/`Ctx` plumbing, no data structure. `fib(30)` passing today by the `match`
-spelling while the `if` spelling and every constructor match are refused is the proof: **1b-ii is
-reachable with no prelude-value work at all**, and 1b-i with no `Match` work at all.
+**Measured 2026-10-19 — the halves are severable *in the emitter* but not *in their gates*, and
+the first attempt failed by ignoring the second half of that.** The value-graph walk (finding 1)
+and the decision-tree walk (finding 2) share only `Emitter.cs`'s `Scope`/`Ctx` plumbing, no data
+structure. `fib(30)` passing today by the `match` spelling while the `if` spelling and every
+constructor match are refused is the proof that **1b-ii is reachable with no prelude-value work at
+all**.
 
-So they are **two forks, not one** — and the first attempt (one fork, both halves) burned its
-turn limit on reconnaissance and landed zero implementation. `Tools/Quill.DumpTerm` gained
-`--ambient=N` (the index space the emitter's `Var` actually uses, which `--env=N` cannot reach
-past the context width) and a real crash fix in the same session, at `e1b951a`; those are the
-instruments both forks should start from.
+**But that is the literal-`I64` `Switch` shape, which was already done in 1a′.** Every remaining
+`Match` shape is a `Destruct`, and a `Destruct` branches on constructors *by definition* — so it
+needs a constructor **value** to branch on, which is 1b-i's representation. Measured, and the
+coupling is hidden by check order (`EmitMatch` validates the tree at `:326` *before* emitting the
+scrutinee):
+
+```
+$ quill run '{ match (True) { True => 1, False => 2 } }'
+quill: not ported yet: backend decision tree      <- the tree check throws first
+$ quill run '{ x = True; match (x) { True => 1, False => 2 } }'
+quill: not ported yet: backend prelude value      <- tree passed, the ambient True value is missing
+```
+
+So **the constructor value representation is the shared prerequisite**: it is 1b-i's to build and
+1b-ii's to branch on. Consequences for briefing:
+
+- 1b-ii's progress is measured by `--parity`'s `NOTPORTED` histogram (`decision tree` 106 falling,
+  with cases re-blocking at a later stage such as `prelude value`/`Nominal`), **not** by an
+  end-to-end value — a case that gets past the tree and dies at `prelude value` is a success for
+  1b-ii and a missing prerequisite for 1b-i.
+- The enum gate (`{ Color = enum { Red, Green }; open Color; … }`) is **not** a 1b gate at all: its
+  scrutinee is `Dot .Red` over `Var 2`, so it needs `Term.Nominal` and `Term.Dot`, which are 1c and
+  owned by neither half.
+- `Tools/Quill.DumpTerm` gained `--ambient=N` (the index space the emitter's `Var` actually uses,
+  which `--env=N` cannot reach past the context width) and a real `InvalidCastException` crash fix
+  (`std` holds `ModuleEntry.Impl`; both `VModule` and `VStruct` printed assumed `Field`) at
+  `e1b951a`. Both were found by the first, failed attempt — so the attempt was not wasted even
+  though it landed no emitter code.
