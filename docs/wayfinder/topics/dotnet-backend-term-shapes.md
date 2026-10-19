@@ -77,23 +77,52 @@ Match { Scrutinee = …,
 
 The emitter consumes `DecisionTree`s, never `if`.
 
-## To dump (the emitter's open questions)
+## Landed: items 1, 2 and 8 (slice 1b, 2026-10-19)
 
-Each of these needs the same treatment — the shape written down, and where the information the
-emitter needs actually lives (the term, the decision tree, or `Context.Environment`):
+**Item 8 — a prelude function's closure, and the `Lambda`/`Body` trap.** A prelude function is
+`VLam(Closure(Environment, Body))` where **`Body` has already lost its outermost `Lam`**: `Nbe.cs`
+builds it as `new Value.VLam(new Closure(env, l.Body))`. So the closure carries one parameter
+implicitly and each further leading `Term.Lam` is one more — the emitted method's arity is
+`1 + leading Lams`. `--ambient=34` shows `i64_to_bool` as `VLam` over `Environment[37]`, whose
+entries are the `True`/`False` `VCon`s. A closure's `Environment` is an ambient environment in its
+own right: it is a whole context chain, not a capture list, which is why the emitted method is
+static and needs no closure object.
 
-1. A match with a constructor **payload binding** (`Some(x) => x`).
-2. A runtime **type-case** (`values/core-072.qll`) — the tree, and where the type value comes
-   from at runtime.
-3. A tuple, and a `Proj`/`Dot` including the method-call fallback (`values/method-300.qll`).
-4. A `struct`/record and a field access.
-5. A ref (`values/written-param-type-ref-letbound.qll`).
-6. An effect with `resume` (`values/core-098.qll`) — and specifically **where the handler and the
-   captured continuation live in the term**, since the machine emission depends on it.
-7. A trait operation resolving to a dictionary (`values/trait-generic-impl-two-bounds.qll`).
-8. A recursive function whose body calls a **prelude function** (`<=`): the concrete `VLam` that
-   `Var` resolves to, and whether its captured `Environment` is all prelude values.
+**Item 1 — a constructor match: the tree carries names, never tags.**
+`{ match (True) { True => 1, False => 2 } }` is
+`Destruct at=base cases[2] default=none` with cases `True`/`False`, arm bodies `Atom 1`/`Atom 2`.
+`if (c) { a } else { b }` is **byte-for-byte this tree** with the two block bodies — `if` never
+survives as a term (`std/lib.qll:14`). `Destruct.Cases` holds only the constructor's *name*, so
+the emitter compares names, as `Nbe.Match.cs`'s `Cases.FirstOrDefault(c => c.Name == con.Name)`
+does. There is no tag number anywhere in the tree. **Payload binders** live in
+`Leaf.Bindings` as `Occurrence.Payload(parent, Constructor, Index)` — a leaf binding `Some(x)`
+names the payload by constructor name and index. `Occurrence.Child` is `VProd.Items[i]`,
+`Occurrence.Field` is `VRecord.Fields.Last(name == …)`.
+
+**Item 2 — a runtime type-case.** `TypeSwitch` (3 cases) and `Sequential` (14) are **still
+refused**, deliberately: they need the interpreter's structural pattern matcher
+(`Nbe.Patterns.cs`) and a type-case's runtime type respectively. Not this slice.
+
+### The seam this cost a merge, recorded so it is not re-made
+
+**A constructor in emitted code is `Runtime.Con` (name only), never `Value.VCon`.** `Value`
+belongs to the evaluator and never appears on a running program's heap — emitted code runs in a
+separately loaded assembly. `MatchOps` was written reading `Value.VCon`, which compiled, passed
+xUnit, and failed **only** at run time on the cases that actually reach a `Destruct`
+(`InvalidOperationException: a match reached a Con its type rules out`), because the two halves of
+slice 1b were built in parallel and neither could observe the other. A helper class emitted code
+calls into must also be **`public`** (`MatchOps` and `Runtime` alike): an `internal` one builds
+fine and dies as a `MethodAccessException` inside the emitted program.
+
 
 Where a type is recoverable only from `Context.Environment` and not from the term, say so — that
 is the finding that decides how much of the typed tier is reachable before the annotation pass
-lands.
+lands. Open questions still owing a dump: (3) a tuple and `Proj`/`Dot` including the method-call
+fallback (`values/method-300.qll`); (4) a `struct`/record and a field access; (5) a ref
+(`values/written-param-type-ref-letbound.qll`); (6) an effect with `resume`
+(`values/core-098.qll`) — and specifically *where the handler and the captured continuation live
+in the term*, since the machine emission depends on it; (7) a trait operation resolving to a
+dictionary (`values/trait-generic-impl-two-bounds.qll`); (8's residue) which `Term` inside a
+prelude closure body carries a `Term.Nominal` — `{ 5 <= 6 }` reaches one and the program term
+itself contains **zero** (measured with a probe), so it is the closure-conversion path's, not the
+general nominal tier's.

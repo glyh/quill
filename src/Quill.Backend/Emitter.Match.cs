@@ -17,7 +17,7 @@ namespace Quill.Backend;
 /// The value tier is the interpreter's: a constructor is a
 /// <see cref="Value.VCon"/>, read by name and payload. That is the interface this
 /// walk needs from the constructor representation; the emitter does not build
-/// one. See docs/wayfinder/topics/dotnet-backend-term-shapes-match.md.
+/// one. See docs/wayfinder/topics/dotnet-backend-term-shapes.md.
 /// </remarks>
 internal sealed partial class Emitter
 {
