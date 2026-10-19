@@ -404,7 +404,9 @@ Slice **1a′** landed 2026-10-17 and one ticket was filed:
   elaboration fails was counted as a match without either path running. Since there are 658
   value-producing cases, real coverage is **111/658 ≈ 17%**. `--parity` now prints
   `real coverage: N value-match (+… both-errored, +… never elaborated)` and a per-node
-  `NOTPORTED` histogram, so a fork's report cannot inherit the inflated number.
+  `NOTPORTED` histogram, so a fork's report cannot inherit the inflated number. **The fix paid for
+  itself the same day**: both halves of slice 1b reported clean builds, and only `--parity` showed
+  the 17-differ regression at their seam.
 - **The histogram is the shape of 1b.** `Module` 112, `decision tree` 106, `implicit
   application` 61, `EffectDecl` 45, `Nominal` 43, `Struct` 41, `Imported` 37, `TraitRef` 34. Those
   are **first**-failure counts: instrumenting the elaborated term per unported case shows a median
