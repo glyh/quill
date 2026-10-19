@@ -151,7 +151,15 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   plus the one literal-`Switch` match shape, `quill run`, and a `--parity` mode; verified on the
   merged tree at xUnit 217, conformance 967/0, parity **352 match / 0 differ / 548 not ported**, and
   20M-deep self and mutual tail recursion both surviving with `tail.` really emitted (1 and 4
-  prefixes byte-scanned out of the image).
+  prefixes byte-scanned out of the image). **That parity number overstates 1a′'s coverage ~3×** —
+  of the 352, only **111** are the backend agreeing on a value (the rest never ran it); see the
+  2026-10-19 frontier entry. Its successor is
+  [slice 1b](tickets/backend-slice-1b.md), filed 2026-10-19.
+- [Backend slice 1b](tickets/backend-slice-1b.md) — **filed 2026-10-19 and open**: compile the
+  prelude **value graph** (prelude functions arrive as `VLam` over a `Closure`, so a `Var` needs
+  closure conversion, not a primitive special case) and the rest of `Match` (`Destruct`, payload
+  bindings, nominal keys). Gate: `fib(30)` → `832040` through `Backend.Run`, against the
+  interpreter's **22.5 s** on this machine.
 - [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
   — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
   annotation table exists, so a typed emitter only gets the signatures the surface wrote
@@ -378,7 +386,46 @@ as the frontier reaches them.
 
 ## Open questions
 
-### Frontier (2026-09-26 → 2026-10-13)
+### Frontier (2026-09-26 → 2026-10-19)
+
+**2026-10-19 — 18 open**, suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
+352 match, 0 differ, 548 not ported** (the integrator's own run at `59894d6`, all four numbers).
+Slice **1a′** landed 2026-10-17 and one ticket was filed:
+
+- **[Backend slice 1b](tickets/backend-slice-1b.md) is filed, and it is the frontier's next step.**
+  Slices 1a′–2 existed only as prose in
+  [the backend topic](topics/dotnet-backend.md)'s staging table, so no fork could be briefed on
+  one. Filed with two measured corrections to that table: **`Con` is a prerequisite of 1b, not
+  1c** (because `i64_to_bool` — `std/bootstrap.qll:6` — returns constructors, so `if (n < 2)` and
+  every prelude predicate need a nominal representation), and **`if` lowers to `Destruct`, never
+  `Switch`** (1a′ carries one literal-`I64` `Switch` shape only).
+- **The parity harness was overstating coverage ~3×, and now does not.** The 352 "match" split
+  measured as **value-match 111, both-errored 6, both-elaboration-failed 235** — a case whose
+  elaboration fails was counted as a match without either path running. Since there are 658
+  value-producing cases, real coverage is **111/658 ≈ 17%**. `--parity` now prints
+  `real coverage: N value-match (+… both-errored, +… never elaborated)` and a per-node
+  `NOTPORTED` histogram, so a fork's report cannot inherit the inflated number.
+- **The histogram is the shape of 1b.** `Module` 112, `decision tree` 106, `implicit
+  application` 61, `EffectDecl` 45, `Nominal` 43, `Struct` 41, `Imported` 37, `TraitRef` 34. Those
+  are **first**-failure counts: instrumenting the elaborated term per unported case shows a median
+  of **11** distinct node kinds still missing, and **zero** cases needing exactly one — so no
+  single node kind completes any case, and the unit of progress is a slice.
+- **Two constructs no slice owns.** `Term.Module` and `Term.Imported` have **no emitting case** in
+  `Emitter.cs` and are named by no slice of the staging table, yet `Module` is the largest
+  first-failure bucket — and since the whole prelude arrives as one `Module`, every later slice
+  meets it.
+- **`elaborator-records-term-types` merges green and pays off nothing yet.** Verified by merging
+  `fork/elaborator-records-term-types` into a scratch worktree and running it: 967/0, xUnit 217,
+  parity unchanged. Its hole table reproduces (`Fix` 0/1 and 0/2, `Lam` 0/2, `Struct` 1/3). Its own
+  ticket says the decisive thing — *nothing consumes the table yet* — so it is enabling work, not
+  the work; its three owed items (delete the scratch `ProbeDumpTests.cs`, make `CoverageProbe` an
+  assertion, record `Fix` first) belong to whichever fork next touches the elaborator.
+- **`fib(30)` is the gate and the payoff is real:** the interpreter takes **22.5 s** on this
+  machine today (the topic doc's 13.6 s was a different host), and the backend currently dies on it
+  in 0.9 s at `not ported yet: backend decision tree`.
+- The 2026-10-13 entry below is left as written, with one correction: its fork bullets name two
+  forks "running on the re-cut work", and both have since reported — 1a′ merged, the annotation
+  finisher unfinished (above).
 
 **2026-10-13 — 17 open** (`dotnet-backend` stays open as a container, like the three port
 umbrellas; one ticket filed, none closed). Suite at HEAD unchanged by this session's docs work —
