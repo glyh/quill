@@ -164,9 +164,13 @@ static (string Line, int Exit) RunChild(string path)
 // compared. "not ported" is the backend's deliberate NotImplementedException; a case whose
 // elaboration fails is a match, because neither path ever runs. A compile failure is a
 // BackendException (an emitter bug), and counts as a differ, never as a language error.
+// The match count alone overstates this badly, so the three ways a case can "match" are
+// counted apart: a case whose elaboration fails never runs either path, and a case where
+// both paths raised agrees only that something errored. Only valueMatch is real coverage.
 static int RunParity(string root)
 {
-    int match = 0, differ = 0, notPorted = 0;
+    int match = 0, differ = 0, notPorted = 0, valueMatch = 0, bothErrored = 0, notElaborated = 0;
+    var kinds = new Dictionary<string, int>();
     var examples = new List<string>();
     foreach (var path in EnumerateCases(root))
     {
@@ -176,16 +180,33 @@ static int RunParity(string root)
         var units = UnitSources(dir, name);
         Elaborated elaborated;
         try { elaborated = Driver.Elaborate(File.ReadAllText(path), units); }
-        catch (Exception) { match++; continue; }
+        catch (Exception) { match++; notElaborated++; continue; }
         var interpreted = Outcome(() => Driver.Describe(Driver.Run(elaborated)));
         var compiled = Outcome(() => Backend.Run(elaborated));
-        if (compiled.Error is NotImplementedException) { notPorted++; continue; }
-        if (Same(interpreted, compiled)) { match++; continue; }
+        if (compiled.Error is NotImplementedException)
+        {
+            notPorted++;
+            var kind = compiled.Error.Message;
+            kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
+            continue;
+        }
+        if (Same(interpreted, compiled))
+        {
+            match++;
+            if (compiled.Error is null) valueMatch++; else bothErrored++;
+            continue;
+        }
         differ++;
         if (examples.Count < 10)
             examples.Add($"{Path.GetRelativePath(root, path)}\n      interpreter: {Show(interpreted)}\n      backend:     {Show(compiled)}");
     }
     foreach (var example in examples) Console.WriteLine($"DIFFER {example}");
+    // Of `match`, only valueMatch is the backend agreeing on a value -- the other two never
+    // ran it. Printed before the total so a reader cannot take the big number for coverage.
+    Console.WriteLine($"  real coverage: {valueMatch} value-match" +
+        $" (+{bothErrored} both-errored, +{notElaborated} never elaborated)");
+    foreach (var (kind, n) in kinds.OrderByDescending(k => k.Value))
+        Console.WriteLine($"  NOTPORTED {n,4}  {kind}");
     Console.WriteLine($"parity: {match + differ + notPorted} cases, {match} match, {differ} differ, {notPorted} not ported");
     return 0;
 }
