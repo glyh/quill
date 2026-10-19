@@ -23,7 +23,7 @@ namespace Quill.Backend;
 /// call is a direct <c>call</c> when the callee is a known method. A tail call is
 /// written with the <c>tail.</c> prefix, which is the reason this emitter exists.
 /// </remarks>
-internal sealed class Emitter
+internal sealed partial class Emitter
 {
     /// <summary>An IL shape: <c>I64</c> is <c>long</c>, <c>Obj</c> the untyped fallback, <c>Fn</c> a delegate.</summary>
     private abstract record Cty
@@ -319,66 +319,34 @@ internal sealed class Emitter
 
     // ---- match --------------------------------------------------------------
 
-    // Only the shape a literal match on an I64 compiles to: a Switch at the base
-    // with atom keys and leaf arms. Everything a payload or a constructor needs is 1b/1c.
+    /// <summary>
+    /// The entry the dispatch calls: evaluate the scrutinee once into a root
+    /// local, then let <c>Emitter.Match.cs</c> walk the tree over it. An arm's
+    /// result is written into one local the whole tree shares (a nested tree
+    /// chooses, it does not return); in tail position each arm returns instead.
+    /// </summary>
     private Cty EmitMatch(Term.Match match, Cty expected, Scope scope, Ctx ctx, bool tail)
     {
-        if (match.Tree is not DecisionTree.Switch { At: Occurrence.Base, Default: DecisionTree.Leaf @default }
-            || @default.Bindings.Length != 0)
-            throw new NotImplementedException("not ported yet: backend decision tree");
-
-        var scrutinee = Emit(match.Scrutinee, Cty.L, scope, ctx, tail: false);
-        Convert(scrutinee, Cty.L, ctx);
-        var slot = ctx.Il.DeclareLocal(typeof(long));
-        ctx.Il.Emit(OpCodes.Stloc, slot);
+        var shape = Natural(match.Scrutinee, scope);
+        var scrutinee = Emit(match.Scrutinee, shape, scope, ctx, tail: false);
+        Convert(scrutinee, shape, ctx);
+        var root = ctx.Il.DeclareLocal(shape.Clr());
+        ctx.Il.Emit(OpCodes.Stloc, root);
+        var at = new MatchValue(shape, root);
 
         if (tail)
         {
-            foreach (var @case in match.Tree is DecisionTree.Switch s ? s.Cases : [])
-            {
-                var arm = LeafBranch(@case.Tree);
-                var next = ctx.Il.DefineLabel();
-                ctx.Il.Emit(OpCodes.Ldloc, slot);
-                ctx.Il.Emit(OpCodes.Ldc_I8, I64Key(@case.Key));
-                ctx.Il.Emit(OpCodes.Bne_Un, next);
-                var produced = Emit(match.Bodies[arm], ctx.Ret, scope, ctx, tail: true);
-                Convert(produced, ctx.Ret, ctx);
-                ctx.Il.Emit(OpCodes.Ret);
-                ctx.Il.MarkLabel(next);
-            }
-            var fallback = Emit(match.Bodies[@default.Branch], ctx.Ret, scope, ctx, tail: true);
-            Convert(fallback, ctx.Ret, ctx);
-            ctx.Il.Emit(OpCodes.Ret);
+            EmitMatchTree(match, match.Tree, at, expected, scope, ctx, tail: true, result: null, end: default);
             return ctx.Ret;
         }
 
         var result = ctx.Il.DeclareLocal(expected.Clr());
         var end = ctx.Il.DefineLabel();
-        foreach (var @case in match.Tree is DecisionTree.Switch s ? s.Cases : [])
-        {
-            var arm = LeafBranch(@case.Tree);
-            var next = ctx.Il.DefineLabel();
-            ctx.Il.Emit(OpCodes.Ldloc, slot);
-            ctx.Il.Emit(OpCodes.Ldc_I8, I64Key(@case.Key));
-            ctx.Il.Emit(OpCodes.Bne_Un, next);
-            var produced = Emit(match.Bodies[arm], expected, scope, ctx, tail: false);
-            Convert(produced, expected, ctx);
-            ctx.Il.Emit(OpCodes.Stloc, result);
-            ctx.Il.Emit(OpCodes.Br, end);
-            ctx.Il.MarkLabel(next);
-        }
-        var other = Emit(match.Bodies[@default.Branch], expected, scope, ctx, tail: false);
-        Convert(other, expected, ctx);
-        ctx.Il.Emit(OpCodes.Stloc, result);
+        EmitMatchTree(match, match.Tree, at, expected, scope, ctx, tail: false, result, end);
         ctx.Il.MarkLabel(end);
         ctx.Il.Emit(OpCodes.Ldloc, result);
         return expected;
     }
-
-    private static int LeafBranch(DecisionTree tree) =>
-        tree is DecisionTree.Leaf { Bindings.Length: 0 } leaf
-            ? leaf.Branch
-            : throw new NotImplementedException("not ported yet: backend decision tree");
 
     private static long I64Key(Atom key) =>
         key is Atom.I64 n ? n.Value : throw new NotImplementedException($"not ported yet: backend switch key {key.GetType().Name}");
