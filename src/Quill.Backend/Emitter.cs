@@ -129,13 +129,19 @@ internal sealed partial class Emitter
     private Cty Emit(Term term, Cty expected, Scope scope, Ctx ctx, bool tail) => term switch
     {
         Term.Atom atom => EmitAtom(atom, expected, ctx),
+        // A bare prelude function used as a value: a delegate over its closure's method.
+        Term.Var { } v when v.Index >= scope.Locals.Count
+            && scope.Ambient[v.Index - scope.Locals.Count] is Value.VLam lam => EmitClosureValue(lam.Body, expected, ctx),
         Term.Var v => EmitVar(v.Index, expected, scope, ctx),
-        Term.Ap ap when PrimitiveSpine(ap, scope) is { } spine => EmitPrimitive(spine, expected, scope, ctx),
+        Term.Ap ap when PrimitiveSpine(ap, scope) is { } spine => EmitPrimitive(spine, expected, scope, ctx),        // A saturated call of a prelude function: the spine's head is a `VLam` in the
+        // value graph, and the arguments bind its whole unary chain (Emitter.Prelude.cs).
+        Term.Ap ap when ClosureSpine(ap, scope) is { } call => EmitClosureCall(call, expected, scope, ctx, tail),
         Term.Ap ap => EmitApply(ap, expected, scope, ctx, tail),
+        Term.Con con => EmitCon(con, expected, ctx),
         Term.Let let => EmitLet(let, expected, scope, ctx, tail),
         Term.Lam lam => EmitLam(lam, expected, scope, ctx),
         Term.Match match => EmitMatch(match, expected, scope, ctx, tail),
-        _ => throw new NotImplementedException($"not ported yet: backend {term.GetType().Name}"),
+        _ => throw new NotImplementedException($"not ported yet: backend {term.GetType().Name} :: {term}"),
     };
 
     private static Cty EmitAtom(Term.Atom atom, Cty expected, Ctx ctx)
@@ -165,11 +171,7 @@ internal sealed partial class Emitter
             }
         }
         var value = scope.Ambient[index - scope.Locals.Count];
-        return value switch
-        {
-            Value.VAtom { Atom: Atom.I64 n } => EmitI64(n.Value, expected, ctx),
-            _ => throw new NotImplementedException("not ported yet: backend prelude value"),
-        };
+        return EmitAmbient(value, expected, ctx);
     }
 
     // let x : A = def in body. A function-shaped definition is a known method, so

@@ -173,16 +173,30 @@ internal sealed partial class Emitter
 
 /// <summary>
 /// The object-tier operations the match walk emits calls to: nothing here is a
-/// value representation, only how a <see cref="Value"/> is read. The interpreter
-/// is the reference (<c>Nbe.Match.cs</c>'s <c>At</c> and <c>SelectArm</c>), so a
-/// constructor is the constructor value the interpreter builds.
+/// value representation, only how a value is read. The interpreter
+/// is the reference (<c>Nbe.Match.cs</c>'s <c>At</c> and <c>SelectArm</c>).
 /// </summary>
-internal static class MatchOps
+/// <remarks>
+/// <b>What it reads is the <em>emitted</em> tier, not the interpreter's.</b> A constructor in
+/// emitted code is <see cref="Runtime.Con"/> (name only), never <see cref="Quill.Kernel.Value.VCon"/>:
+/// <c>Value</c> belongs to the evaluator and never appears in a running program's heap. Reading
+/// <c>VCon</c> here built and passed xUnit and failed only at run time, on the cases that
+/// actually reach a <c>Destruct</c>.
+/// </remarks>
+/// <remarks>
+/// <b>Must stay <c>public</c>, like <see cref="Runtime"/> and for the same reason:</b> the
+/// emitted program is a separate, dynamically-loaded assembly, so it cannot call an
+/// <c>internal</c> member here. <c>internal</c> compiled and built fine and failed only at
+/// run time, as a <c>MethodAccessException</c> inside emitted code — and only on the cases
+/// that actually reach a <c>Destruct</c>, which is why it survived both forks alone and
+/// appeared the moment a constructor value could be materialised.
+/// </remarks>
+public static class MatchOps
 {
     /// <summary>The constructor's name, which is the tag a <c>Destruct</c> branches on.</summary>
     public static string ConstructorName(object value) => value switch
     {
-        Value.VCon con => con.Name,
+        Runtime.Con con => con.Name,
         _ => throw new InvalidOperationException($"a match reached a {value?.GetType().Name ?? "null"} its type rules out"),
     };
 

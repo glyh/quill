@@ -11,6 +11,16 @@ namespace Quill.Backend;
 public static class Runtime
 {
     /// <summary>
+    /// A constructor as emitted code carries it: its name, and nothing else. The
+    /// emitted counterpart of <see cref="Quill.Kernel.Value.VCon"/>, so
+    /// <see cref="Describe"/> can render it by name the way
+    /// <see cref="Quill.Compiler.Driver.Describe"/> renders the interpreter's.
+    /// </summary>
+    // shortcut: no payloads, because slice 1b-i only reaches `Bool`; a constructor
+    // with arguments needs an argument array, which is 1c's general nominal tier.
+    public sealed record Con(string Name);
+
+    /// <summary>
     /// The self-imposed recursion ceiling. The CLR dies with an uncatchable stack
     /// overflow at ~250k trivial frames (docs/wayfinder/topics/dotnet-backend.md), so the
     /// guard must sit well under that; emitted frames are larger than the probe's.
@@ -47,6 +57,7 @@ public static class Runtime
     public static string Describe(object value) => value switch
     {
         long n => n.ToString(),
+        Con c => c.Name,
         _ => value.GetType().Name,
     };
 
