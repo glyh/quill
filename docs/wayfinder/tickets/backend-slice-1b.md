@@ -68,7 +68,10 @@ running.
 
 - `fib(30)` → **`832040`** through `Backend.Run`, and faster than the 22.5 s the interpreter
   takes on this machine (measured today; the topic doc's 13.6 s baseline was a different host).
-- `{ 5 <= 6 }` → `1` (in `Driver.Describe`'s terms; the interpreter prints the value — match it).
+- `{ 5 <= 6 }` → **`True`** — `Driver.Describe` renders a `VCon` by its **name**
+  (`Driver.cs:69-74`), not as an `I64`; measured with `--file`, which prints `VALUE True`. So the
+  backend's `Runtime.Describe` must render a `Bool` constructor the same way, or this case becomes
+  a `differ` even though the emitter is correct.
 - `{ 1 == 1 }` either works or still refuses **only** on `implicit application`, which is 1e.
 - `--parity`: **differ stays 0**. `not ported` must fall, and the fork reports the new
   value-match / both-errored / both-elab-failed split, not just the total.
