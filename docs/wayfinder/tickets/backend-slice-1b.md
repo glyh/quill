@@ -7,14 +7,49 @@ status: open
 assignee:
 blocked_by: []
 # Filed 2026-10-19 by the integrator, off the reconnaissance below. Slice 1a' landed
-# 2026-10-17; this is the next slice in docs/wayfinder/topics/dotnet-backend.md's staging
-# table, which had no ticket of its own until now.
+# 2026-10-17. 1b-ii landed 2026-10-19 (926eb49); 1b-i landed the same day (b416d65) with
+# one measured residue left, so this ticket stays OPEN on that residue rather than closing.
+#
+# Residue (2026-10-19): `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }` and the `if` spelling of
+# fib all stop at `not ported yet: backend Nominal`. The Nominal is inside a **prelude
+# closure body**, not the program: a probe walking the elaborated program term counts
+# **zero** Nominal terms, so this is the closure-conversion path's hole and NOT 1c's general
+# nominal tier. Next probe: make the emitter print the offending term (it currently prints
+# only `term.GetType().Name`) and read which subterm of `<=`'s closure body it is.
 ---
 
 # Backend slice 1b — compile the prelude value graph and the rest of Match
 
 The staging table in [the .NET backend topic](../topics/dotnet-backend.md) describes slices 1a′–2
 as prose. This ticket is 1b, filed so a fork has a name, frontmatter and a gate.
+
+## Where it stands — 2026-10-19
+
+**1b-ii (the `Match` walk) is done**, merged `926eb49`; **1b-i (the prelude value graph) is
+mostly done**, merged `b416d65`, with **one measured residue** (the frontmatter above).
+Integrator's own run on the merged tree, not a fork's report:
+
+| | before | after |
+|---|---|---|
+| conformance | 967 / 0 | **967 / 0** |
+| xUnit | 217 | **217** |
+| parity value-match | 111 | **132** |
+| parity differ | 0 | **0** |
+| `decision tree` refusals | 106 | **17** (Sequential 14, TypeSwitch 3 — deliberate) |
+
+Now working through `Backend.Run`: `{ True }` → `True`, `{ i64_to_bool(1) }` → `True`,
+`{ not(False) }` → `True`, `{ match (True) { True => 1, False => 2 } }` → `1`,
+`{ if (True) { 3 } else { 4 } }` → `3`, `{ rec fib … match … }` → `832040`, and the `if`
+spelling of `fib(30)` now gets past the tree (to the residue above) instead of dying at it.
+
+**The two halves were built in parallel and the seam cost a merge — see the topic doc's
+"The seam this cost a merge".** Neither branch alone could fail on it: 1b-ii's `Destruct` body
+was unreachable until 1b-i could materialise a constructor value. Two bugs, both compile-clean
+and xUnit-clean, and both only visible through `--parity`: `MatchOps` was `internal` (emitted
+code is a separately loaded assembly and cannot call internals → `MethodAccessException`), and
+it read `Value.VCon` where emitted code produces `Runtime.Con` (→ `InvalidOperationException`
+on the 17 cases that reach a `Destruct`). **Lesson for the next parallel split: run the parity
+harness before reporting, and treat a fork's unmeasured suite numbers as unmeasured.**
 
 ## Reconnaissance (integrator, 2026-10-19, HEAD `4eb7594`)
 
