@@ -7,6 +7,8 @@
 //   --expand     print module bindings instead of eliding them
 //   --depth N    stop recursing past N (default 60)
 //   --env N      print the value of Context.Environment[N] (a de Bruijn index)
+//   --ambient N  print Ambient[N], the environment the emitter compiles the
+//                program body in (the prelude open's members, then the base context)
 //   --type       print the program's type (a Value) only
 //   --no-run     skip the Context.Names index and the run
 //   --values     descend into closure environments and values (OFF by default:
@@ -59,6 +61,22 @@ if (args.FirstOrDefault(a => a.StartsWith("--env")) is { } envArg)
             if (e.Level == entry) p.Line($"  named by Context.Opened: {open}.{n}");
     foreach (var kv in program.Context.BaseNames)
         if (kv.Value.Level == entry) p.Line($"  named by Context.BaseNames: {kv.Key}");
+    Console.WriteLine(p.Text);
+    return 0;
+}
+
+// --ambient=N: the same entry as the emitter sees it. `Emitter.EmitProgram` strips the
+// program's `Open (import "std")` into an ambient environment, so an index in the program
+// body counts the open's members first and the base context after them -- not the
+// `Context.Environment` index `--env` prints. This is the direct answer to "what does the
+// body's `Var i` mean", which `--env` cannot give past the context's own width.
+if (args.FirstOrDefault(a => a.StartsWith("--ambient")) is { } ambientArg)
+{
+    var index = int.Parse(ambientArg[9..].TrimStart('='));
+    var ambient = program.Context.Environment;
+    for (var t = program.Term; t is Term.Open { Of: Term.Imported imported } open; t = open.Body)
+        ambient = Nbe.PushOpenMembers(ambient, imported.Value, open.Members);
+    p.PrintValue($"Ambient[{index}] of {ambient.Count} (base context entries {program.Context.Environment.Count})", ambient[index]);
     Console.WriteLine(p.Text);
     return 0;
 }
@@ -333,6 +351,13 @@ sealed class Printer(bool expand, int maxDepth, bool values, int maxBytes, Conte
         }
     }
 
+    private static string Entry(ModuleEntry e) => e switch
+    {
+        ModuleEntry.Field f => $"{f.Name} ({f.Kind}) ctor={(f.Constructor is null ? "no" : f.Constructor.Constructor.Name)} : {Labels.Short(f.Value)}",
+        ModuleEntry.Impl i => $"impl {i.Name ?? "_"} ({i.Kind}) : {Labels.Short(i.Value)}",
+        _ => e.GetType().Name,
+    };
+
     private static string BindingName(BindingTerm b) => b switch
     {
         BindingTerm.Let l => l.Name,
@@ -458,13 +483,13 @@ sealed class Printer(bool expand, int maxDepth, bool values, int maxBytes, Conte
                 Nest(() =>
                 {
                     var show = m.Entries.ToList().Take(expand ? int.MaxValue : 8);
-                    foreach (var e in show) { var f = (ModuleEntry.Field)e; Line($"  {f.Name} ({f.Kind}) ctor={(f.Constructor is null ? "no" : f.Constructor.Constructor.Name)} : {Labels.Short(f.Value)}"); }
+                    foreach (var e in show) Line("  " + Entry(e));
                     if (m.Entries.Length > 8) Line($"  … {m.Entries.Length - 8} more");
                 });
                 return;
             case Value.VStruct s:
                 Line($"VStruct partial={s.Partial} entries[{s.Entries.Length}]");
-                Nest(() => { foreach (var e in s.Entries.ToList()) { var f = (ModuleEntry.Field)e; Line($"  {f.Name} ({f.Kind}) : {Labels.Short(f.Value)}"); } });
+                Nest(() => { foreach (var e in s.Entries.ToList()) Line("  " + Entry(e)); });
                 return;
             case Value.VRecord r:
                 Line($"VRecord type={Labels.Short(r.Type)}");
