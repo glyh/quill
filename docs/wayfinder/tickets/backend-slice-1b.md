@@ -126,8 +126,9 @@ interpreter on this machine (three runs, same answer each time). Yes, this passe
 as is every constructor match:
 
 - `{ Color = enum { Red, Green }; open Color; match (Color.Green) { Red => 1, Green => 2 } }` →
-  expects **`2`**; currently `not ported yet: backend Nominal`.
-- The `Red` variant → expects **`1`**.
+  expects **`2`**; at this measurement it was refused `not ported yet: backend Nominal`, and it
+  answers **`2`** since [1c-i](backend-slice-1c-i.md).
+- The `Red` variant → expects **`1`**, and answers it since 1c-i.
 
 **1b-i (prelude value graph).** `{ 5 <= 6 }` → **`True`**, currently `not ported yet: backend
 prelude value`. Note the rendering: `Driver.Describe` prints a `VCon` by its **name**
@@ -142,7 +143,8 @@ cases, 0 failed**; xUnit at 217, or more with a new test.
 
 ## Not in this slice
 
-`Struct`/records/tuples/`Proj`/`Dot`/`Open` (1c), refs and effects (1d), traits/dictionaries and
+`Struct`/records/tuples/`Proj`/`Dot`/`Open` (1c — the nominal half of that landed as 1c-i on
+2026-10-20, the structural half is 1c-ii), refs and effects (1d), traits/dictionaries and
 type-case (1e), the annotation pass (1f). `Implicit application` is 1e and is expected to stay
 refused here.
 

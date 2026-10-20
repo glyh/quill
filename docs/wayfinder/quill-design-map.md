@@ -273,9 +273,11 @@ as the frontier reaches them.
   must be `public`, because the emitted assembly cannot call `internal` (`MethodAccessException`,
   again only at run time). **Cheap when it sharpens:** a convention check over
   `src/Quill.Backend/` — every type emitted code touches is public, and no member its helpers read
-  is a `Quill.Kernel.Value` — would have caught both instances. Not written, because two known
-  instances picked off by hand do not yet justify a check; the third one earns it. See
-  [Payload still reads the wrong tier](tickets/backend-matchops-payload-wrong-tier.md) and
+  is a `Quill.Kernel.Value` — would have caught both instances. **The trigger for writing it has
+  fired:** 1c-i found the third and fourth (`MatchOps.ProdItem`, `Field`), so "the third one earns
+  it" is now the next `src/Quill.Backend/` change's obligation, and they are
+  [filed](tickets/backend-matchops-record-wrong-tier.md) with 1c-ii as their fix. See
+  [Payload read the wrong tier](tickets/backend-matchops-payload-wrong-tier.md) and
   [the term-shapes topic](topics/dotnet-backend-term-shapes.md)'s *"The seam this cost a merge"*,
   which records both failure modes with their exact exception names.
 - **The closure-conversion assumption: is every reachable closure's `Environment` a context
@@ -437,54 +439,36 @@ as the frontier reaches them.
 
 ### Frontier (2026-09-26 → 2026-10-20)
 
-**2026-10-20 — 20 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
-419 match, 0 differ, 481 not ported** (`real coverage: 178 value-match`). Slice **1c-i (the nominal
-tier) is closed** the same day, and it retired the frontier's open `MatchOps.Payload` ticket:
-`Runtime.Con` has payloads, so the second copy of the tier bug became reachable, was fixed, and was
-exercised through `--parity` (`values/elab-152.qll` → 6, `core-107` → 42). Checking the rest of
-`MatchOps` while there found the bug twice more (`ProdItem`, `Field`) — filed as
-[the record tier ticket](tickets/backend-matchops-record-wrong-tier.md), latent until 1c-ii. The
-two slices that came out of re-cutting 1c are [1c-i](tickets/backend-slice-1c-i.md) (closed) and
-[1c-ii](tickets/backend-slice-1c-ii.md) (open, and now the owner of the `Module`/`Imported` buckets
-that no slice had claimed); the `captured local` wall (31 cases, the runner's second-largest
-refusal) was [filed on its own](tickets/backend-captured-local.md) because nothing owned it.
-Slice **1b is closed**:
-both halves landed 2026-10-19, and its one residue closed 2026-10-20 (`cfc55e7`) — measured to be
-neither of the two things the parked probe was going to choose between. The tickets it left:
+**2026-10-20 — 20 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**,
+xUnit **217/217**, `--parity` **900 cases, 419 match, 0 differ, 481 not ported** (`real coverage:
+178 value-match`). The integrator's own run, not a fork's.
 
-- **[Compiling a prelude closure reaches a `Nominal` it cannot emit](tickets/backend-prelude-closure-reaches-nominal.md)**
-  — 1b's one residue, **closed 2026-10-20**. The guess in it (`Let.Type` / a `Pi` domain / a value
-  in the closure's environment) and the split-out ticket's dichotomy ("skip a type position" vs
-  "the first real demand for a nominal value") were both wrong in the same way: the `Nominal` was
-  reachable only through a `Var` index that was **off by one**. `EnsureClosureMethod` bound one
-  parameter per `Lam` in the closure's chain and then emitted the body with those `Lams` still on
-  it, so each was bound twice and the body's ambient lookups all shifted one entry — `i64_to_bool`
-  became `Option`, and `Option`'s value is a `VLam` over a closure whose body is the `Nominal`, so
-  the emitter was compiling a type former as a function. One line, the `LamChain` helper that was
-  already in the file unused. It exposed `EmitSwitch` comparing a boxed-`I64` object-tier
-  scrutinee against `Ldc_I8` (`Bne_Un` across tiers — not IL, never equal, so always the default
-  arm: `i64_to_bool(0)` was `True`), which is why the two fixes had to land together; the strip
-  alone turned 3 suite cases into `differ`s. Lesson worth carrying: **a `not ported yet` message is
-  a claim about the term, not a measurement of it** — here the term was right and the index was
-  wrong.
-- **[`MatchOps.Payload` still read the interpreter's `Value.VCon`](tickets/backend-matchops-payload-wrong-tier.md)**
-  — **closed 2026-10-20 with 1c-i.** The second copy of the seam bug fixed in `b416d65`, filed
-  rather than fixed because it was unreachable while `Runtime.Con` had no payloads and an
-  unexercisable fix is the kind that looks verified and is not. 1c-i made it reachable and fixed it
-  in the same change; the prediction ("it detonates at run time inside emitted code the moment 1c
-  adds payloads") held exactly, and the ticket's closing rule — check every `MatchOps` member — found
-  two more copies.
-- **[`--parity` exits 0 when it found differs](tickets/parity-exits-zero-on-differ.md)** —
-  **closed 2026-10-20**, same session it was filed in. `RunParity` ended `return 0;`
-  unconditionally, so the one mode that can see a backend/interpreter disagreement reported
-  success to everything but a human reading stdout; it now ends `return differ == 0 ? 0 : 1;`,
-  with `not ported` deliberately not failing the run. Both seam bugs were invisible to `build`,
-  xUnit and the default runner mode; only a human-read `--parity` line found them. Half a day
-  after the mode's coverage fix (`59894d6`) paid for itself, this was the other half of making
-  it usable as a gate.
+- **Slice [1c-i](tickets/backend-slice-1c-i.md) landed** — the backend's nominal tier: `Runtime.Con`
+  payloads, an enum declaration as a value *and* a declaration, a type emitted as a value where a
+  term demands one. It retired the frontier's last backend ticket (`MatchOps.Payload`, below) and
+  cut 1c in two: [1c-ii](tickets/backend-slice-1c-ii.md) (the structural tier) is open and is now
+  the owner of the `Module` (115) and `Imported` (37) buckets that no slice had claimed.
+  [`captured local` (31)](tickets/backend-captured-local.md) was filed on its own because nothing
+  owned it. **Sharpens when**: 1c-ii starts, and the first thing it will need is whether
+  `Term.Module` is skipped (its value is the ambient environment `EmitProgram` already builds) or
+  emitted.
+- **Three tickets closed the same day, and each left a rule.** [`MatchOps.Payload`](tickets/backend-matchops-payload-wrong-tier.md)
+  read the interpreter's tier and was unreachable only while `Runtime.Con` had no payloads — its
+  prediction held exactly, and the rule it earns (**check every member against both tier and
+  visibility**) found the bug twice more, [filed](tickets/backend-matchops-record-wrong-tier.md)
+  rather than fixed. [The prelude-closure `Nominal`](tickets/backend-prelude-closure-reaches-nominal.md)
+  was neither of the two things its probe was going to choose between: an ambient index off by one
+  binder, so **a `not ported yet` message is a claim about the term, not a measurement of it**.
+  [`--parity` exiting 0 on a differ](tickets/parity-exits-zero-on-differ.md) is why both seam bugs
+  needed a human to read stdout — the mode is a gate now.
+- **`Sequential` (21) and `TypeSwitch` (3) are 1e's, not 1c's** — measured: every `Sequential`
+  refusal is `match (T)` on a `Type` with `NominalHead`/`AtomType`/`StructType` arms, i.e.
+  type-case. STATUS and the staging table said otherwise until this run; both are corrected.
+- **Slice 1b is closed** (both halves 2026-10-19, residue `cfc55e7`); its reconnaissance is in
+  [its ticket](tickets/backend-slice-1b.md).
 
-**Suite, xUnit and parity are the integrator's own run**, at the merge of both 1b halves. Slice
-1b's own reconnaissance is in its ticket.
+**2026-10-19/20, slice 1b — kept as history**, because it is where the staging table's two
+corrections and the parity harness's coverage bug were measured:
 
 - **[Backend slice 1b](tickets/backend-slice-1b.md) was filed and landed the same day**, so the
   frontier's next step is no longer it. Slices 1a′–2 existed only as prose in
@@ -508,10 +492,11 @@ neither of the two things the parked probe was going to choose between. The tick
   are **first**-failure counts: instrumenting the elaborated term per unported case shows a median
   of **11** distinct node kinds still missing, and **zero** cases needing exactly one — so no
   single node kind completes any case, and the unit of progress is a slice.
-- **Two constructs no slice owns.** `Term.Module` and `Term.Imported` have **no emitting case** in
-  `Emitter.cs` and are named by no slice of the staging table, yet `Module` is the largest
+- **Two constructs no slice owned.** `Term.Module` and `Term.Imported` had **no emitting case** in
+  `Emitter.cs` and were named by no slice of the staging table, yet `Module` was the largest
   first-failure bucket — and since the whole prelude arrives as one `Module`, every later slice
-  meets it.
+  meets it. **Claimed 2026-10-20 by [1c-ii](tickets/backend-slice-1c-ii.md)** (115 and 37
+  refusals).
 - **Slice 1b landed in both halves** (1b-ii `926eb49`, 1b-i `b416d65`) — the `Match` walk over
   `DecisionTree`s (`Emitter.Match.cs`) and the prelude value graph (`Emitter.Prelude.cs`:
   `Runtime.Con`, `EmitVar`'s ambient fallthrough, closure conversion over `Closure(Environment, Term)`).

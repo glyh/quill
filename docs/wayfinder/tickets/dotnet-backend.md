@@ -18,11 +18,12 @@ program can be built and run as a .NET artifact, not only interpreted through Nb
 
 ## Where it stands
 
-- **The backend exists**, past slices 1a′ (landed 2026-10-17) and 1b (landed 2026-10-19, and its
-  [residue](backend-prelude-closure-reaches-nominal.md) closed 2026-10-20). `Backend.Run` emits IL into a
+- **The backend exists**, past slices 1a′ (landed 2026-10-17), 1b (landed 2026-10-19; its
+  [residue](backend-prelude-closure-reaches-nominal.md) closed 2026-10-20) and
+  [1c-i](backend-slice-1c-i.md) (the nominal tier, landed 2026-10-20). `Backend.Run` emits IL into a
   saved .NET assembly; the staging table, the measurements behind it and the ruling are in
   [the backend topic](../topics/dotnet-backend.md), and the current suite/parity numbers are in
-  the map's frontier.
+  the map's frontier. Next: [1c-ii](backend-slice-1c-ii.md) (the structural tier).
 - **`src/Quill.Cli run <file>` is the entry point** and drives `Backend.Run`. The interpreter is
   still the reference execution path (`Driver.Run`), and the conformance runner's `--file` mode
   still uses it — so a `--file` result says nothing about the backend; use `--parity` for that.

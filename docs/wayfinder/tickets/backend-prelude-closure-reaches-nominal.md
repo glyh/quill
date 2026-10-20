@@ -18,7 +18,8 @@ blocked_by: []
 Found 2026-10-19 while verifying slice 1b (merged `b416d65`). 1b-i's closure conversion
 (`src/Quill.Backend/Emitter.Prelude.cs`) compiles a prelude `VLam` by emitting its
 `Closure.Body` in the closure's own environment. For four programs that is as far as it
-gets — the emitter's dispatch reaches a `Term.Nominal` and refuses it:
+got — the emitter's dispatch reached a `Term.Nominal` and refused it (all four answer since
+`cfc55e7`; this is the symptom as filed):
 
 ```
 $ quill run '{ 5 <= 6 }'
@@ -98,5 +99,5 @@ cannot reach past the context width.
 - **The closure-environment-prefix assumption** this path rests on is unproven in general — see
   the fog entry in the map. A non-prefix capture would silently read wrong ambient entries, and
   nothing currently checks for it.
-- `MatchOps.Payload` reading `Value.VCon` is a latent copy of the seam bug fixed in `b416d65`;
-  it is unreachable today only because `Runtime.Con` carries no payloads.
+- `MatchOps.Payload` reading `Value.VCon` was a latent copy of the seam bug fixed in `b416d65`,
+  unreachable only while `Runtime.Con` carried no payloads; **fixed in 1c-i**.

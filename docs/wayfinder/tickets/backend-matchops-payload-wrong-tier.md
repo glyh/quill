@@ -29,12 +29,14 @@ public static object Payload(object value, int index) => value switch
 };
 ```
 
-## Why this is not a live failure today
+## Why this was not a live failure before 1c-i
 
-**`Runtime.Con` carries no payloads** — it is `public sealed record Con(string Name)`, a
-deliberate slice-1b shortcut, because the only constructor 1b-i reaches is `Bool`. So no
-emitted value can be a payload-carrying constructor, `Payload` is never called with one,
-and nothing in the suite can flip.
+*(The state as filed; `Con` has carried its `Args` since 1c-i — see the resolution.)*
+
+**`Runtime.Con` carried no payloads** — it was `public sealed record Con(string Name)`, a
+deliberate slice-1b shortcut, because the only constructor 1b-i reached was `Bool`. So no
+emitted value could be a payload-carrying constructor, `Payload` was never called with one,
+and nothing in the suite could flip.
 
 **That is the whole risk**: the bug and its invisibility have the same cause. The moment
 1c adds payloads to `Runtime.Con` (or the general nominal tier arrives), `Payload` starts

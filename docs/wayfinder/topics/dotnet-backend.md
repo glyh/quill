@@ -22,8 +22,12 @@ this holds the ruling and the evidence behind it.
    disassembling rather than by diffing C#; and ECMA-335 encoding is ours to get right (the
    generator does the encoding, not the stack depths).
 2. **Value model: native .NET types, typed where the term carries a type.** `Atom.I64` is IL
-   `int64`; a nominal's constructors are generated classes; closures are real methods plus
-   generated closure classes. **Not** the evaluator's `Value` hierarchy.
+   `int64`; closures are real methods plus generated closure classes. **Not** the evaluator's
+   `Value` hierarchy. *Measured 2026-10-20, and this ruling was half wrong:* a constructor is not a
+   generated class but a `Runtime.Con` record carrying its name and payloads — matching what the
+   interpreter branches on (a name) rather than inventing a tag tier — and no closure class exists
+   yet, because every generated method is static; a captured local is still refused (31 cases,
+   [filed](../tickets/backend-captured-local.md)).
 3. **Effectful code: a state machine only where the effect row needs it.** Pure arrows emit plain
    IL methods with `tail.` at tail positions; arrows carrying effects emit a machine whose fields
    hold what is live across a suspension, with an `int` state as the resume point and one switch
@@ -205,15 +209,11 @@ harness are salvaged into 1a′, and its C#-text emitter is dropped, since nothi
 
 ## Open
 
-**The two live choices are written up as a reading document**:
-[the two choices still open](dotnet-backend-choices.md) — option-by-option, with the emitted shapes
-for a verified effect program and what each costs. It also records what today's pivot to IL does
-to work already done. Summary of what is open, with the reading doc as the detail:
-
-- **Effectful code**: machine only where the effect row needs it (recommended), machine plus a
-  tail sentinel inside it, a universal machine, or CPS with a continuation object.
-- **IL generation**: `Reflection.Emit` + `PersistedAssemblyBuilder` (recommended, since
-  `OpCodes.Tailcall` is the whole point) or a raw `System.Reflection.Metadata` PE writer.
+**What is open is what is left to build, not which way to build it**: slices 1c-ii, 1d, 1e, 1f and 2
+of the staging table, plus the depth-guard question below. The two choices this section used to
+call live — the effect representation and the IL-writing route — were both **ruled 2026-10-13**
+(sections 1 and 2 below); the option-by-option reading, with the emitted shapes and what each
+cost, is kept in [the two choices](dotnet-backend-choices.md).
 
 ### 1. Tail-call strategy — ruled 2026-10-13: emit IL
 

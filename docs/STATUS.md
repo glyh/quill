@@ -18,7 +18,7 @@ failed, xUnit 217, parity 0 differ — 2026-10-20.
 
 ## Completed
 
-### The .NET backend — slices 1a′ and 1b (2026-10-19)
+### The .NET backend — slices 1a′, 1b and 1c-i (2026-10-17 → 2026-10-20)
 
 The compiler has a second execution path: `Core.term` → IL, built with
 `System.Reflection.Emit` + `PersistedAssemblyBuilder` (`src/Quill.Backend/`), driven by
@@ -33,8 +33,9 @@ not exist yet.
   its `Runtime.cs`, CLI and parity harness were salvaged.
 - **Slice 1b (2026-10-19, two halves `926eb49` + `b416d65`)** — the rest of `Match` over
   `DecisionTree`s, and the prelude value graph: `Runtime.Con`, `EmitVar`'s ambient fallthrough,
-  and closure conversion over `Closure(Environment, Term)`. `Sequential` (14 refusals) and
-  `TypeSwitch` (3) remain deliberately out.
+  and closure conversion over `Closure(Environment, Term)`. `Sequential` and `TypeSwitch` were
+  left deliberately out and are **1e's, not 1c's** (measured 2026-10-20: all 21 `Sequential`
+  refusals are `match (T)` on a `Type`, i.e. type-case).
 - **Measured on the merged tree** (the integrator's own run, not a fork's): suite **967 cases, 0
   failed**, xUnit **217/217**, `--parity` **900 cases, 381 match, 0 differ, 519 not ported**
   (`real coverage: 140 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
@@ -55,10 +56,14 @@ not exist yet.
   were wrong. Fixed in the same commit; it is why the two could not land apart, since the strip
   alone turned 3 suite cases into `differ`s. Detail:
   [compiling a prelude closure reaches a Nominal it cannot emit](wayfinder/tickets/backend-prelude-closure-reaches-nominal.md).
-- **All 44 remaining `Nominal` refusals are program-level type declarations** (`Color = enum { … }`
-  binds a term whose value is a type), which is 1c's, and none of them is inside a prelude closure.
-  So nothing in the backend needs a nominal *value* yet: 1c's first half that matters here is
-  representing/skipping a type declaration, not materialising `Value.VCon.Args`.
+- **The 1b-era reading of the `Nominal` residue, and what 1c-i measured 2026-10-20.** All 44 were
+  program-level type declarations (`Color = enum { … }` binds a term whose value is a type), and
+  none was inside a prelude closure, so 1b concluded that *nothing in the backend needs a nominal
+  value yet*. **Half of that held**: no case needs `Value.VCon.Args` reached through a declaration,
+  because payloads arrive as `Term.Con` and as ambient `VCon`s the program builds. **The other
+  half was wrong**: four cases demand a **type as a value** — `VAtomTy`/`VNominal` through a `Var`
+  — since `F(b) = match (b) { True => I64, False => Bool }` really is a function returning a value.
+  That is what 1c-i's `Runtime.AtomType`/`Runtime.Nominal` exist for, and all 44 refusals are gone.
 - **Slice 1c-i, the nominal tier (2026-10-20)** — `Runtime.Con` carries payloads and
   `MatchOps.Payload` reads the emitted tier; an enum declaration is a value *and* a declaration, so
   its constructors are emitted from the declaration; `Term.Nominal`/`Open`/`Dot`/`Con` are

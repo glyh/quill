@@ -1,11 +1,11 @@
 ---
-title: A .NET backend — the two choices still open
+title: A .NET backend — the two choices (ruled 2026-10-13)
 labels:
   - wayfinder:topic
 status: decided
 ---
 
-# The two choices still open
+# The two choices, and what decided them
 
 **Ruled 2026-10-13, so this document is now the record rather than a question:**
 
@@ -272,11 +272,12 @@ Honest accounting, because one fork's work largely dies here.
 | `src/Quill.Backend/Emitter.cs` — the C#-text emitter | **dies**; rewritten as IL emission |
 | the Roslyn dependency and `CSharpCompilation` host | **dies**; no NuGet dependency left |
 | the emitter's *decisions* (what each `Term` becomes, how `Fix` groups and closures are laid out) | carries over as design, not as code |
-| the term-shapes survey | incomplete — no doc was written; I have not verified what is on its branch |
+| the term-shapes survey | incomplete then — since written up in [the term-shapes topic](dotnet-backend-term-shapes.md), which 1a′–1c-i kept growing |
 
-I have **not** verified the backend fork's branch myself yet. I will read its diff and run the
-suite before merging anything, and I will report what actually passes rather than what its
-report claims.
+**What happened to the two "not yet"s above, recorded rather than left standing** (2026-10-20):
+the fork's branch *was* read and run before merging — slice 1a′ landed 2026-10-17 with the
+integrator's own build, xUnit and parity numbers — and the term-shapes doc exists; its *verified*
+sections are the ones a dump backs, and the ones still marked *to dump* are listed there.
 
 ## One consequence worth naming before you decide
 

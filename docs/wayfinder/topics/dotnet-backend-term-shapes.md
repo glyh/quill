@@ -8,9 +8,13 @@ status: open
 # The elaborated term as the emitter receives it
 
 Companion to [the .NET backend](dotnet-backend.md). Dump a term with
-`tools/Quill.DumpTerm` (`quill-dump-term <file.qll> [--expand] [--depth N] [--env N] [--type]
-[--no-run] [--no-values]`), which also prints `Context.Environment` as de Bruijn indices with each
-entry's type — the "what does `Var i` mean" question, answered directly.
+`tools/Quill.DumpTerm` (`quill-dump-term <file.qll> [--expand] [--depth N] [--env N]
+[--ambient N] [--type] [--no-run] [--values] [--max-bytes N]`), which also prints
+`Context.Environment` as de Bruijn indices with each entry's type — the "what does `Var i` mean"
+question, answered directly. `--ambient N` is the index space the emitter actually uses (the
+program's own `open (import "std")` pushes its members first), which `--env N` cannot reach past
+the context's width; `--values` descends into closure environments and is off by default because
+that is what turns a dump into 1.7 MB.
 
 **This document is deliberately partial.** It records what has been dumped and verified so far;
 the sections below marked *to dump* are the emitter's open questions, not findings. Do not read a
@@ -99,20 +103,26 @@ does. There is no tag number anywhere in the tree. **Payload binders** live in
 names the payload by constructor name and index. `Occurrence.Child` is `VProd.Items[i]`,
 `Occurrence.Field` is `VRecord.Fields.Last(name == …)`.
 
-**Item 2 — a runtime type-case.** `TypeSwitch` (3 cases) and `Sequential` (14) are **still
-refused**, deliberately: they need the interpreter's structural pattern matcher
-(`Nbe.Patterns.cs`) and a type-case's runtime type respectively. Not this slice.
+**Item 2 — a runtime type-case.** `TypeSwitch` and `Sequential` are **still refused**, and they
+are **1e's, not 1c's** — measured 2026-10-20: all 21 `Sequential` refusals are `match (T)` on a
+`Type` whose arms are `NominalHead`/`AtomType`/`StructType` type patterns (`values/core-078` …
+`core-096`), so both trees need the interpreter's type-case matcher (`Nbe.Patterns.cs`) plus a
+runtime type. Not this slice.
 
 ### The seam this cost a merge, recorded so it is not re-made
 
-**A constructor in emitted code is `Runtime.Con` (name only), never `Value.VCon`.** `Value`
+**A constructor in emitted code is `Runtime.Con` (name and payloads), never `Value.VCon`.** `Value`
 belongs to the evaluator and never appears on a running program's heap — emitted code runs in a
 separately loaded assembly. `MatchOps` was written reading `Value.VCon`, which compiled, passed
 xUnit, and failed **only** at run time on the cases that actually reach a `Destruct`
 (`InvalidOperationException: a match reached a Con its type rules out`), because the two halves of
 slice 1b were built in parallel and neither could observe the other. A helper class emitted code
 calls into must also be **`public`** (`MatchOps` and `Runtime` alike): an `internal` one builds
-fine and dies as a `MethodAccessException` inside the emitted program.
+fine and dies as a `MethodAccessException` inside the emitted program. Both copies of the tier bug
+are fixed as of 1c-i (`ConstructorName` in `b416d65`, `Payload` in 1c-i, where payloads made the
+second one reachable); `ProdItem` and `Field` are the same bug and still read the evaluator's tier,
+unreachable until 1c-ii emits a record or a tuple
+([filed](../tickets/backend-matchops-record-wrong-tier.md)).
 
 **Two more instances of the same family, 2026-10-20 (`cfc55e7`), and the rule they earn.** The
 emitter meets the term at two places where a count or a tier can be off by one, and both failures
@@ -144,6 +154,45 @@ have caught both: emit-time assertions that an ambient index is in range and tha
 matching stack tiers.
 
 
+## Verified: the nominal tier (1c-i, 2026-10-20)
+
+`{ Color = enum { Red, Green }; open Color; match (Color.Green) { Red => 1, Green => 2 } }`:
+
+```
+Let { Type = U,
+      Def  = Nominal enum#71 ctors [Red/0, Green/0],
+      Body = Open members=[ctor Red/0, ctor Green/0] of = Var 0
+               Body = Match { Scrutinee = Dot { Of = Var 2, Name = Green },
+                              Tree = Destruct at=base cases[Red, Green] } }
+```
+
+Three things this settles:
+
+- **`open.Of` and `Dot.Of` are terms, not values**, and the emitter resolves them statically
+  (`Var` → the `NominalDecl` its binder recorded; `Lam` chain → the `Nominal` at its end; `Ap` →
+  its head). Nothing is evaluated to name a constructor, which is why a declaration can bind a
+  *compile-time* entry and still work in a value position (materialised on demand).
+- **`Term.Con` is the end of a payload constructor's lambda chain.** A constructor of arity *n*
+  arrives as `fn(p0) … fn(pn-1) { Con(name, [p0 … pn-1], nominal) }`, and its parts are variables
+  of that chain — so `Runtime.Con`'s `Args` are those arguments, in order.
+- **A payload match binds by occurrence, and the tree still carries only names.**
+  `match (Pair(10, Some(4))) { Pair(a, Some(b)) => a - b }` is a `Destruct at=base case Pair` whose
+  child is `Destruct at=base.Pair[1]` with cases `None`/`Some`; the leaf bindings are
+  `base.Pair[0]` and `base.Pair[1].Some[0]` — i.e. `Occurrence.Payload(parent, constructor, index)`,
+  read at run time by `MatchOps.Payload`.
+
+**And the shape that made `type T a = …` look unported**: a use site passes a former's type
+parameter **implicitly**, even though the constructor's own payloads are explicit —
+
+```
+Ap (Explicit) { fn = Ap (Implicit) { fn = Some, arg = InsertedMeta 911 }, arg = 42 }
+```
+
+The implicit argument has no runtime value (it *is* the type parameter), so a saturated constructor
+spine skips implicit arguments and matches the explicit ones against the declaration's payload
+arity. Any other callee keeps `InsertedMeta` unported — `backend implicit application`, 89 cases,
+mostly trait dictionaries.
+
 Where a type is recoverable only from `Context.Environment` and not from the term, say so — that
 is the finding that decides how much of the typed tier is reachable before the annotation pass
 lands. Open questions still owing a dump: (3) a tuple and `Proj`/`Dot` including the method-call
@@ -154,5 +203,5 @@ in the term*, since the machine emission depends on it; (7) a trait operation re
 dictionary (`values/trait-generic-impl-two-bounds.qll`); (8's residue) ~~which `Term` inside a prelude
 closure body carries a `Term.Nominal`~~ — **answered 2026-10-20 (`cfc55e7`)**: none does. `{ 5 <= 6 }`
 reached `Option`'s type-former closure through a `Var` index one binder too high (see *the seam*
-above), and all 44 remaining `Nominal` refusals are program-level type declarations, not closure
-bodies.
+above); the remaining `Nominal` refusals were program-level type declarations, and 1c-i emitted
+them, so the count is now **0**.
