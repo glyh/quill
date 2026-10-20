@@ -24,8 +24,9 @@ dotnet test test/Quill.Tests                           # xUnit (internals)
 dotnet run --project test/Quill.Conformance            # the shared language suite
 ```
 
-There is **no REPL**: `src/Quill.Cli` is a stub that prints `quill: the .NET port has no entry
-point yet` and exits 1. To run one program, use the suite's single-file mode (below).
+There is **no REPL**: `src/Quill.Cli` has one command, `quill run <file>`, which compiles through
+the IL backend (`Backend.Run`). To run a program through the interpreter, use the suite's
+single-file mode (below); `--parity` is the only mode that compares the two paths.
 
 A single conformance program, the way the suite judges it:
 
