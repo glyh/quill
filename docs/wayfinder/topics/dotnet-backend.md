@@ -173,12 +173,20 @@ Each slice is separately verifiable and leaves the previous one working.
 | slice | contents | acceptance |
 | --- | --- | --- |
 | 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; **plus the one `Match` shape a recursion probe cannot be written without** (below); `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions a `CanTailcall`-style check accepts | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive. **Landed 2026-10-17:** all met, verified on the merged tree — `tail.` prefixes 1 (self) and 4 (mutual) in the emitted image, both 20M runs exit 0 |
-| 1b | the rest of `Match` over `DecisionTree`s (payload bindings, nominal keys, `Destruct`, guards, non-base occurrences), and prelude-function compilation from the value graph. **Landed 2026-10-19 in two halves** (1b-ii `926eb49`, 1b-i `b416d65`); `Sequential` and `TypeSwitch` deliberately out. Detail and the one open residue: [the slice ticket](../tickets/backend-slice-1b.md) | `fib(30)` → `832040`, and faster than the 13.6 s baseline. **Met twice over — and note the first half of it was already met before 1b started**, by the `match` spelling rather than the `if` one (measured 2026-10-19: 0.6 s backend against 7.2 s interpreted at `e1b951a`). The `if` spelling passed at `b416d65`. See the ticket's Acceptance, which this table got wrong |
+| 1b | the rest of `Match` over `DecisionTree`s (payload bindings, nominal keys, `Destruct`, guards, non-base occurrences), and prelude-function compilation from the value graph. **Landed 2026-10-19 in two halves** (1b-ii `926eb49`, 1b-i `b416d65`); `Sequential` and `TypeSwitch` deliberately out. Detail and the one open residue: [the slice ticket](../tickets/backend-slice-1b.md) | `fib(30)` → `832040`, and faster than the 13.6 s baseline. **Met by the `match` spelling, which was already met before 1b started** (measured 2026-10-19: 0.6 s backend against 7.2 s interpreted at `e1b951a`). The `if` spelling gets past the decision tree at `b416d65` but **does not pass**: it stops at 1b's `Nominal` residue (`{ 5 <= 6 }`'s hole), so read the gate as one spelling met, not two. See the ticket's Acceptance, which this table got wrong twice |
 | 1c | `Struct`/record/tuple, `Open`, `Proj`/`Dot`, and **the general nominal tier** (payload-carrying constructors, `Value.VCon.Args`). A *minimal* `Con` — constructor name only, no payloads — was pulled forward into 1b, which this table got wrong: `i64_to_bool` (`std/bootstrap.qll:6`) returns constructors, so `if (n < 2)` and every prelude predicate need one | the `values/` match/struct/record population matches the interpreter |
 | 1d | refs (`VRef`, `RefCell`), effects: the machine for arrows whose row is non-empty, `perform` handing it the machine, `resume` re-entering at its state, one-shot enforced by clearing it | the 43 ref and 55 effect cases, including `core-098` (43), `core-049` (5) and `ref-nbe-continuation-used` (still `error`) |
 | 1e | traits/dictionaries, type-case, generative stamps | the remaining type-case cases |
 | 1f | the elaboration-time annotation pass; typed emission everywhere | typed tier; `--backend dotnet` becomes the default in the runner |
 | 2 | `quill build` writing the assembly `PersistedAssemblyBuilder` produces; delete `Driver.Run` as a program path | the binary is the artifact |
+
+**Constructs no slice owns.** Two node kinds have **no emitting case** in `Emitter.cs` and no row
+in the table above, measured 2026-10-19 from the parity histogram: `Term.Module` is the largest
+first-failure bucket (`Module` 112 of 900 cases) and `Term.Imported` accounts for 37 more.
+(`Term.InsertedMeta` also has no case; its cases present as `backend implicit application`.)
+Because the whole prelude arrives as one `Module` term, every later slice meets it. This is
+unowned work, not a slice's residue: the next slice that touches it should either claim it in the
+table or file it as its own ticket.
 
 **The match shape 1a′ carries, and why it is not 1b's.** `if (c) { … } else { … }` is not a term: it
 is a syntax macro (`std/lib.qll:14`) that lowers to `Match` over `Bool`. So *any* terminating

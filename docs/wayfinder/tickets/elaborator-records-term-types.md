@@ -10,6 +10,40 @@ blocked_by: []
 
 # The elaborator records a type for every term it builds
 
+## Where it stands — 2026-10-19, verified by the integrator
+
+**The branch merges clean and is green, and still nothing consumes the table.**
+`fork/elaborator-records-term-types` (`eaf8628`) was merged into a scratch worktree over
+`4eb7594`, its scratch test deleted, and run: **build 0 errors, conformance 967/0, xUnit 217,
+parity 352 match / 0 differ / 548 not ported — unchanged** (352/548 are that base's numbers, from
+before `59894d6` split the count; today's runner would print value-match). So the merge itself
+costs nothing and risks nothing; what it does not do is make the table total.
+
+**The hole table below reproduces**, by copying `CoverageProbe` from the sibling branch
+`pi-agent-ca0ce18c-6795-469` (`9527ae1`) onto that merged tree — it is that branch's file, not
+`eaf8628`'s. Result: `Fix` 0/1 and 0/2, `Lam` 0/2 in the trait program and 0/4 in the mutual-rec
+one, `Struct` 0/1 and 1/3. Unchanged from the 2026-10-13 measurement.
+
+**The three owed items, in order — this is the whole remaining work:**
+1. **Delete `test/Quill.Tests/ProbeDumpTests.cs`** (44 lines; it writes `/tmp/probe-dump.txt` and
+   asserts nothing). It is the only reason the branch is described as unmergeable, and deleting it
+   was sufficient — the merge above was otherwise conflict-free.
+2. **Bring in `CoverageProbe` and turn it into an assertion.** It lives on the sibling branch
+   (`9527ae1`), not on `eaf8628`, and it currently prints per-category counts and asserts nothing,
+   so it passes on an empty table. A per-category non-trivial recorded count, or a test that fails
+   on an empty table, is the difference between a measurement and a diagnostic.
+3. **Record the missing sites, `Fix` first** — `.Structs.cs`, `.Traits.cs`, `.Match.cs` and
+   `.RecTypes.cs` have no recording call sites at all. `Fix` is what a signature-hungry emitter
+   needs most and is recorded nowhere.
+
+**Why it is still not the frontier's next step:** its own sentence below is the answer — *nothing
+consumes the table yet*. Slice 1f is where a consumer arrives, and 1b proved the emitter can
+reach `132 value-match` with `Let.Type` and the object tier alone (a lambda with no written type
+degrades to `Func<object,object>`, which is slower but correct). So this is **enabling work for
+1f**, and its three items belong to whichever fork next touches the elaborator rather than to a
+fork of their own — with [slice 1b's residue](../tickets/backend-prelude-closure-reaches-nominal.md)
+and 1c ahead of it.
+
 ## Where it stands — 2026-10-13, two forks died mid-work
 
 The keying decision is **made and documented**, the mechanism works where it is wired, and the

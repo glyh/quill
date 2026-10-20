@@ -18,9 +18,14 @@ program can be built and run as a .NET artifact, not only interpreted through Nb
 
 ## Where it stands
 
-- **There is no backend.** The pipeline ends at NbE → value, and `src/Quill.Cli` is a stub that
-  prints `quill: the .NET port has no entry point yet` and exits 1. The only way to run a program
-  is the conformance runner's single-file mode.
+- **The backend exists**, past slices 1a′ (landed 2026-10-17) and 1b (landed 2026-10-19, with
+  [one open residue](backend-prelude-closure-reaches-nominal.md)). `Backend.Run` emits IL into a
+  saved .NET assembly; the staging table, the measurements behind it and the ruling are in
+  [the backend topic](../topics/dotnet-backend.md), and the current suite/parity numbers are in
+  the map's frontier.
+- **`src/Quill.Cli run <file>` is the entry point** and drives `Backend.Run`. The interpreter is
+  still the reference execution path (`Driver.Run`), and the conformance runner's `--file` mode
+  still uses it — so a `--file` result says nothing about the backend; use `--parity` for that.
 - The only analysis is in `docs/ideas/compiler-architecture.md` §"Backend: C, LLVM, or your own —
   and what a second backend costs", whose verdict is **undecided and unscheduled**: *"there is no
   backend… Nothing in `docs/wayfinder` picks one — the closest is the fog item on the

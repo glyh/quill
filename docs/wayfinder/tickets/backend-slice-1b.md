@@ -11,11 +11,12 @@ blocked_by: []
 # one measured residue left, so this ticket stays OPEN on that residue rather than closing.
 #
 # Residue (2026-10-19): `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }` and the `if` spelling of
-# fib all stop at `not ported yet: backend Nominal`. The Nominal is inside a **prelude
-# closure body**, not the program: a probe walking the elaborated program term counts
-# **zero** Nominal terms, so this is the closure-conversion path's hole and NOT 1c's general
-# nominal tier. Next probe: make the emitter print the offending term (it currently prints
-# only `term.GetType().Name`) and read which subterm of `<=`'s closure body it is.
+# fib all stop at `not ported yet: backend Nominal`. **Split into its own ticket the same day:**
+# [compiling a prelude closure reaches a Nominal it cannot emit](backend-prelude-closure-reaches-nominal.md).
+# This ticket stays open only until that one lands, then closes as done. The Nominal is inside a
+# **prelude closure body**, not the program: a probe walking the elaborated program term counts
+# **zero** Nominal terms, so it is the closure-conversion path's hole and NOT 1c's general nominal
+# tier.
 ---
 
 # Backend slice 1b — compile the prelude value graph and the rest of Match
@@ -50,6 +51,12 @@ code is a separately loaded assembly and cannot call internals → `MethodAccess
 it read `Value.VCon` where emitted code produces `Runtime.Con` (→ `InvalidOperationException`
 on the 17 cases that reach a `Destruct`). **Lesson for the next parallel split: run the parity
 harness before reporting, and treat a fork's unmeasured suite numbers as unmeasured.**
+
+The seam left three tickets behind, all filed the same day rather than left in this one's prose:
+the second copy of the tier bug
+([`MatchOps.Payload`](backend-matchops-payload-wrong-tier.md)), the harness's silent exit status
+([`--parity` exits 0 on a differ](parity-exits-zero-on-differ.md)), and this ticket's own residue
+([the prelude-closure `Nominal`](backend-prelude-closure-reaches-nominal.md)).
 
 ## Reconnaissance (integrator, 2026-10-19, HEAD `4eb7594`)
 

@@ -247,6 +247,36 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
 Dim directions — real, but not yet sharp enough to be tickets. Signposts, cleared
 as the frontier reaches them.
 
+- **The emitted backend's two value tiers, and the type mismatch that compiles clean.**
+  Sharpened 2026-10-19 by the seam bug at slice 1b's merge, kept as fog because the reachable
+  instances are fixed, the one remaining copy is latent (filed below), and the general form has no
+  program behind it. `Quill.Kernel.Value` is
+  the **evaluator's** tier; the emitted program runs in a separately loaded assembly and can hold
+  only the **emitted** tier (`Quill.Backend.Runtime`'s types). The mismatch is silent by
+  construction: passing `Value.VCon` where emitted code produces `Runtime.Con` *compiles*, passes
+  xUnit and the suite, and fails only at run time inside emitted code — and only on the inputs
+  that reach the code path at all. The same shape has a second form: a helper emitted code calls
+  must be `public`, because the emitted assembly cannot call `internal` (`MethodAccessException`,
+  again only at run time). **Cheap when it sharpens:** a convention check over
+  `src/Quill.Backend/` — every type emitted code touches is public, and no member its helpers read
+  is a `Quill.Kernel.Value` — would have caught both instances. Not written, because two known
+  instances picked off by hand do not yet justify a check; the third one earns it. See
+  [Payload still reads the wrong tier](tickets/backend-matchops-payload-wrong-tier.md) and
+  [the term-shapes topic](topics/dotnet-backend-term-shapes.md)'s *"The seam this cost a merge"*,
+  which records both failure modes with their exact exception names.
+- **The closure-conversion assumption: is every reachable closure's `Environment` a context
+  prefix?** Fog, from the same session. `Emitter.Prelude.cs` compiles a prelude `VLam` as a
+  **static** method — no closure object, no capture list — which is only sound because every
+  closure reachable from the ambient was evaluated over a prefix of the same context chain, so
+  `Var i` can be read as `closure.Environment[i]` directly. It is evidenced for `i64_to_bool`
+  (whose `Environment` holds exactly the `True`/`False` `VCon`s) and **not proven in general**. A
+  non-prefix capture would read wrong ambient entries *silently* — no throw, just a wrong value —
+  which makes it the worst failure class in this part of the backend. **Sharpens when** a closure
+  is found whose environment is not a prefix — or, more cheaply, the first `--parity` **differ**
+  appears that no refused node explains (a `differ` is *not* a `not ported`: the backend ran and
+  produced the wrong answer, which is why `differ` must stay 0 while `not ported` falls). Deciding
+  it needs a probe over `Context.Environment` at closure-creation sites (`Nbe.cs`'s `Term.Lam`
+  case and the value-graph walks), not a design session.
 - ~~**CLR / C# rewrite shape**~~ — the rewrite happened: promoted out of fog to
   [port `core_tt` to .NET (C#)](tickets/port-core-tt-to-dotnet.md), in progress from
   2026-09-16, **at parity 2026-09-25** (`port-fails: 0`, the prototype deleted the same
@@ -388,17 +418,38 @@ as the frontier reaches them.
 
 ### Frontier (2026-09-26 → 2026-10-19)
 
-**2026-10-19 — 18 open**, suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
-352 match, 0 differ, 548 not ported** (the integrator's own run at `59894d6`, all four numbers).
-Slice **1a′** landed 2026-10-17 and one ticket was filed:
+**2026-10-19 — 21 open**, suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
+373 match, 0 differ, 527 not ported** (`real coverage: 132 value-match`). Slice **1b landed in both
+halves**, and three tickets were filed from it:
 
-- **[Backend slice 1b](tickets/backend-slice-1b.md) is filed, and it is the frontier's next step.**
-  Slices 1a′–2 existed only as prose in
+- **[Compiling a prelude closure reaches a `Nominal` it cannot emit](tickets/backend-prelude-closure-reaches-nominal.md)**
+  — 1b's one residue, split into its own ticket. `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }` and the
+  `if` spelling of `fib(30)` all stop at `backend Nominal`. **Measured: the program term contains
+  zero `Nominal`**, so the one reached is inside a prelude closure body and this is the
+  closure-conversion path's hole, **not** 1c's nominal tier — the next probe is one line of
+  instrumentation.
+- **[`MatchOps.Payload` still reads the interpreter's `Value.VCon`](tickets/backend-matchops-payload-wrong-tier.md)**
+  — the second copy of the seam bug fixed in `b416d65`, filed rather than fixed because it is
+  unreachable today (`Runtime.Con` has no payloads) and an unexercisable fix is the kind that looks
+  verified and is not. It detonates at run time inside emitted code the moment 1c adds payloads.
+- **[`--parity` exits 0 when it found differs](tickets/parity-exits-zero-on-differ.md)** —
+  `RunParity` ends `return 0;` unconditionally, so the one mode that can see a backend/interpreter
+  disagreement reports success to everything but a human reading stdout. Both seam bugs were
+  invisible to `build`, xUnit and the default runner mode; only a human-read `--parity` line found
+  them. Half a day after the mode's coverage fix (`59894d6`) paid for itself, this is the other half
+  of making it usable as a gate.
+
+**Suite, xUnit and parity are the integrator's own run**, at the merge of both 1b halves. Slice
+1b's own reconnaissance is in its ticket.
+
+- **[Backend slice 1b](tickets/backend-slice-1b.md) was filed and landed the same day**, so the
+  frontier's next step is no longer it. Slices 1a′–2 existed only as prose in
   [the backend topic](topics/dotnet-backend.md)'s staging table, so no fork could be briefed on
-  one. Filed with two measured corrections to that table: **`Con` is a prerequisite of 1b, not
-  1c** (because `i64_to_bool` — `std/bootstrap.qll:6` — returns constructors, so `if (n < 2)` and
-  every prelude predicate need a nominal representation), and **`if` lowers to `Destruct`, never
-  `Switch`** (1a′ carries one literal-`I64` `Switch` shape only).
+  one. It was filed with two measured corrections to that table, both of which held: **`Con` is a
+  prerequisite of 1b, not 1c** (because `i64_to_bool` — `std/bootstrap.qll:6` — returns
+  constructors, so `if (n < 2)` and every prelude predicate need one; the table now says so), and
+  **`if` lowers to `Destruct`, never `Switch`** (1a′ carries one literal-`I64` `Switch` shape
+  only). It stays **open on its one residue**, the `Nominal` ticket above.
 - **The parity harness was overstating coverage ~3×, and now does not.** The 352 "match" split
   measured as **value-match 111, both-errored 6, both-elaboration-failed 235** — a case whose
   elaboration fails was counted as a match without either path running. Since there are 658
@@ -416,16 +467,13 @@ Slice **1a′** landed 2026-10-17 and one ticket was filed:
   `Emitter.cs` and are named by no slice of the staging table, yet `Module` is the largest
   first-failure bucket — and since the whole prelude arrives as one `Module`, every later slice
   meets it.
-- **Slice 1b landed in both halves 2026-10-19** (1b-ii `926eb49`, 1b-i `b416d65`) — the `Match`
-  walk over `DecisionTree`s (`Emitter.Match.cs`) and the prelude value graph (`Emitter.Prelude.cs`:
+- **Slice 1b landed in both halves** (1b-ii `926eb49`, 1b-i `b416d65`) — the `Match` walk over
+  `DecisionTree`s (`Emitter.Match.cs`) and the prelude value graph (`Emitter.Prelude.cs`:
   `Runtime.Con`, `EmitVar`'s ambient fallthrough, closure conversion over `Closure(Environment, Term)`).
-  Integrator's own run on the merged tree: 967/0, xUnit 217, parity **373 match / 0 differ**,
-  value-match **111 → 132**, `decision tree` refusals **106 → 17**. Now working through `Backend.Run`:
-  `{ True }`, `{ match (True) { … } }`, `{ if (True) { … } }`, and both spellings of `fib(30)` past
-  the tree. **One measured residue keeps [the ticket](tickets/backend-slice-1b.md) open:**
-  `{ 5 <= 6 }` and `{ min(3, 4) }` stop at `backend Nominal` — and it is *not* 1c, because a probe
-  walking the elaborated program term counts **zero** `Nominal` terms, so the one thrown is inside a
-  prelude closure body and is the closure-conversion path's own hole.
+  `decision tree` refusals **106 → 17** (Sequential 14, TypeSwitch 3 — both deliberate). `Backend.Run`
+  now handles `{ True }`, `{ match (True) { … } }`, `{ if (True) { … } }` and fib(30) in its
+  `match` spelling (`832040`); fib's `if` spelling hits the same residue as `{ 5 <= 6 }`, reported
+  just above, and that residue is the only reason 1b is still open.
 - **Two halving lessons from 1b, both paid for.** (1) **A `Destruct` cannot run without a
   constructor *value***, so the halves are coupled by their gates even though the code is
   severable — proven by ablation (6 cases land on `EmitDestruct`'s body with a `cases=2 at=Base`
@@ -444,9 +492,10 @@ Slice **1a′** landed 2026-10-17 and one ticket was filed:
   ticket says the decisive thing — *nothing consumes the table yet* — so it is enabling work, not
   the work; its three owed items (delete the scratch `ProbeDumpTests.cs`, make `CoverageProbe` an
   assertion, record `Fix` first) belong to whichever fork next touches the elaborator.
-- **`fib(30)` is the gate and the payoff is real:** the interpreter takes **22.5 s** on this
-  machine today (the topic doc's 13.6 s was a different host), and the backend currently dies on it
-  in 0.9 s at `not ported yet: backend decision tree`.
+- **`fib(30)` is the gate and the payoff is real, measured after 1b:** the `match` spelling returns
+  **`832040` through `Backend.Run` in 0.59 s against 6.70 s through the interpreter** (`--file`, one
+  process each, same machine); the `if` spelling is blocked by the `Nominal` residue above. The
+  0.9 s refusal at `backend decision tree` that the reconnaissance recorded is the pre-1b state.
 - The 2026-10-13 entry below is left as written, with one correction: its fork bullets name two
   forks "running on the re-cut work", and both have since reported — 1a′ merged, the annotation
   finisher unfinished (above).
