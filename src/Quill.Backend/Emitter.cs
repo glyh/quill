@@ -8,21 +8,25 @@ namespace Quill.Backend;
 
 /// <summary>
 /// <see cref="Term"/> to IL, built with <see cref="ILGenerator"/> and saved with
-/// <see cref="PersistedAssemblyBuilder"/>. Slices 1a′/1b/1c-i emit atoms, primitives,
+/// <see cref="PersistedAssemblyBuilder"/>. Slices 1a′/1b/1c-i/1c-ii emit atoms, primitives,
 /// <c>Var</c>/<c>Let</c>/<c>Lam</c>/<c>Ap</c>/<c>Fix</c>, the whole <c>Match</c> walk except the
-/// type-case trees, the prelude value graph, and the nominal tier (<c>Nominal</c>/<c>Con</c>/
-/// <c>Open</c>/<c>Dot</c> over a nominal). Everything else is refused with a
+/// type-case trees, the prelude value graph, the nominal tier (<c>Nominal</c>/<c>Con</c>/
+/// <c>Open</c>/<c>Dot</c> over a nominal), and the structural tier — a module, a struct type, a
+/// record, a tuple, <c>open</c> and <c>Dot</c> over a value, <c>Imported</c>
+/// (<c>Emitter.Structs.cs</c>). Everything else is refused with a
 /// <see cref="NotImplementedException"/> naming the shape: an unported path must never satisfy a
 /// case expecting an error. Which shapes those are, measured, is in
 /// <c>docs/wayfinder/topics/dotnet-backend.md</c>'s staging table.
 /// </summary>
 /// <remarks>
 /// The emitter compiles a <em>(term, value-environment)</em> pair: a de Bruijn
-/// index either names a binder the emitter introduced or an entry of the ambient
-/// environment the program runs in -- the base context, pushed to by the prelude's
-/// <c>open</c>. Every quill function is unary, so a function value is a
-/// <c>Func&lt;param, ret&gt;</c> delegate over a generated static method, and a
-/// call is a direct <c>call</c> when the callee is a known method. A tail call is
+/// index either names a binder the emitter introduced, a value captured into the current method's
+/// closure, or an entry of the ambient environment the program runs in -- the base context, pushed
+/// to by the prelude's <c>open</c>. Every quill function is unary, so a function value is a
+/// <c>Func&lt;param, ret&gt;</c> delegate over a generated method, and a call is a direct
+/// <c>call</c> when the callee is a known method. A lambda that reads an enclosing method's local
+/// cannot be static: it becomes an instance method of a generated class holding one
+/// <c>object[]</c> of captured values, and the delegate is built over that instance. A tail call is
 /// written with the <c>tail.</c> prefix, which is the reason this emitter exists.
 /// </remarks>
 internal sealed partial class Emitter
@@ -47,10 +51,17 @@ internal sealed partial class Emitter
         };
     }
 
-    /// <summary>What a binder in scope names: an IL local, a generated static method, or a type.</summary>
+    /// <summary>What a binder in scope names: an IL local, a captured value, a generated static method, or a type.</summary>
     private abstract record Binding(Cty Ty)
     {
         public sealed record Local(int Owner, int Slot, Cty Ty) : Binding(Ty);
+
+        /// <summary>A value captured into the current method's closure environment, at <paramref name="Slot"/>.</summary>
+        public sealed record Env(int Owner, int Slot, Cty Ty) : Binding(Ty);
+
+        /// <summary>A member read off a container value by label: what an <c>open</c> pushes.</summary>
+        public sealed record Member(Local Container, string Name) : Binding(Cty.O);
+
         public sealed record MethodRef(MethodBuilder Method, Cty Ty) : Binding(Ty);
 
         /// <summary>
@@ -83,6 +94,9 @@ internal sealed partial class Emitter
         public Cty Ret { get; } = ret;
         public List<LocalBuilder> Locals { get; } = [];
 
+        /// <summary>The closure object's environment field, when this method is a capturing lambda's body.</summary>
+        public FieldBuilder? Env { get; init; }
+
         public int AddLocal(LocalBuilder lb)
         {
             Locals.Add(lb);
@@ -90,11 +104,36 @@ internal sealed partial class Emitter
         }
     }
 
+    /// <summary>
+    /// A lambda's generated method, and the values it captures. When
+    /// <see cref="Closure"/> is null the method is static and nothing travels with the
+    /// delegate; otherwise it is an instance method of a generated class holding one
+    /// <c>object[]</c> of captured values.
+    /// </summary>
+    private sealed record LambdaInfo(MethodBuilder Method, List<(int Index, Binding Original)> Captures, TypeBuilder? Closure, ConstructorBuilder? Ctor);
+
+    /// <summary>The identity <see cref="LambdaInfo"/> is cached under: the lambda itself, by reference.</summary>
+    private sealed class LambdaKey : IEqualityComparer<(Term Lam, Cty Fn)>
+    {
+        public static readonly LambdaKey Comparer = new();
+
+        public bool Equals((Term Lam, Cty Fn) a, (Term Lam, Cty Fn) b) =>
+            ReferenceEquals(a.Lam, b.Lam) && a.Fn == b.Fn;
+
+        public int GetHashCode((Term Lam, Cty Fn) key) =>
+            HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(key.Lam), key.Fn);
+    }
+
+    private ModuleBuilder _module = null!;
     private TypeBuilder _type = null!;
     private int _nameSeq;
     private int _methodSeq;
-    private readonly Dictionary<Term, MethodBuilder> _lambdas = new();
+    // Keyed by the lambda by *reference* -- two textually identical lambdas are different
+    // functions and capture different scopes, while Term records compare structurally -- and by
+    // the shape it is emitted at, because the same lambda used at two shapes is two methods.
+    private readonly Dictionary<(Term Lam, Cty Fn), LambdaInfo> _lambdas = new(LambdaKey.Comparer);
     private readonly Dictionary<FixMember, MethodBuilder> _fixMembers = new();
+    private readonly List<TypeBuilder> _closuresToCreate = new();
 
     /// <summary>Elaborates nothing; emits <paramref name="program"/> and returns its entry point.</summary>
     public static Func<object> EmitProgram(Elaborated program)
@@ -115,8 +154,8 @@ internal sealed partial class Emitter
     private Func<object> Build(Term term, Cty type, Environment ambient)
     {
         var assembly = new PersistedAssemblyBuilder(new AssemblyName("Quill.Generated"), typeof(object).Assembly);
-        var module = assembly.DefineDynamicModule("quill");
-        _type = module.DefineType("Quill.Generated.Program",
+        _module = assembly.DefineDynamicModule("quill");
+        _type = _module.DefineType("Quill.Generated.Program",
             TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Abstract);
 
         var entry = _type.DefineMethod("Entry", MethodAttributes.Public | MethodAttributes.Static,
@@ -126,6 +165,9 @@ internal sealed partial class Emitter
         Convert(produced, Cty.O, ctx);
         ctx.Il.Emit(OpCodes.Ret);
 
+        // Closure classes first: a generated method's IL refers to one before the enclosing
+        // type exists, so every type is created only once all bodies are complete.
+        foreach (var closure in _closuresToCreate) closure.CreateType();
         _type.CreateType();
         using var stream = new MemoryStream();
         assembly.Save(stream);
@@ -156,6 +198,15 @@ internal sealed partial class Emitter
         Term.Ap ap => EmitApply(ap, expected, scope, ctx, tail),
         Term.Con con => EmitConTerm(con, expected, scope, ctx),
         Term.Nominal nominal => EmitNominalValue(nominal.Decl, expected, ctx),
+        // A spliced unit's value already carries its own environment (I5); it is the value
+        // that crosses, so there is nothing to emit for the splice itself.
+        Term.Imported imported => EmitAmbient(imported.Value, expected, ctx),
+        Term.Struct st => EmitStructType(st, expected, scope, ctx),
+        Term.RecordConstruct record => EmitRecordConstruct(record, expected, scope, ctx),
+        Term.Module module => EmitModule(module, expected, scope, ctx),
+        Term.Prod prod => EmitProd(prod, expected, scope, ctx),
+        Term.ProdTy prodTy => EmitProdTy(prodTy, expected, scope, ctx),
+        Term.Proj proj => EmitProj(proj, expected, scope, ctx),
         Term.AtomTy atomTy => EmitAtomTypeValue(atomTy.Ty, expected, ctx),
         Term.Let let => EmitLet(let, expected, scope, ctx, tail),
         Term.Lam lam => EmitLam(lam, expected, scope, ctx),
@@ -167,67 +218,122 @@ internal sealed partial class Emitter
 
     private static Cty EmitAtom(Term.Atom atom, Cty expected, Ctx ctx)
     {
-        if (atom.Value is not Atom.I64 n)
-            throw new NotImplementedException($"not ported yet: backend atom {atom.Value.GetType().Name}");
-        ctx.Il.Emit(OpCodes.Ldc_I8, n.Value);
-        return Convert(Cty.L, expected, ctx);
+        if (atom.Value is Atom.I64 n)
+        {
+            ctx.Il.Emit(OpCodes.Ldc_I8, n.Value);
+            return Convert(Cty.L, expected, ctx);
+        }
+        return Convert(EmitAtomText(atom.Value.ToString(), ctx), expected, ctx);
+    }
+
+    /// <summary>
+    /// A non-I64 atom as a value. Its own text is all anything in emitted code can read off
+    /// it, and it is enough: a `#stamp` module's Unit is the loudest, and no primitive applies.
+    /// </summary>
+    private static Cty EmitAtomText(string text, Ctx ctx)
+    {
+        ctx.Il.Emit(OpCodes.Ldstr, text);
+        ctx.Il.Emit(OpCodes.Newobj, AtomCtor);
+        return Cty.O;
     }
 
     private Cty EmitVar(int index, Cty expected, Scope scope, Ctx ctx)
     {
         if (index < scope.Locals.Count)
-        {
-            switch (scope.Locals[index])
-            {
-                case Binding.Local local when local.Owner == ctx.Id:
-                    ctx.Il.Emit(OpCodes.Ldloc, ctx.Locals[local.Slot]);
-                    return Convert(local.Ty, expected, ctx);
-                // A local of another method would need a real closure; that is 1b's job.
-                case Binding.Local:
-                    throw new NotImplementedException("not ported yet: backend captured local");
-                case Binding.MethodRef method:
-                    return EmitMethodValue(method, expected, ctx);
-                case Binding.Nominal nominal when nominal.Former is null:
-                    return EmitNominalValue(nominal.Decl, expected, ctx);
-                case Binding.Nominal { Former: { } former }:
-                    return EmitMethodValue(former, expected, ctx);
-                case Binding.Ctor ctor:
-                    return EmitCtorValue(ctor.Constructor, expected, ctx);
-                default:
-                    throw new InvalidOperationException();
-            }
-        }
+            return LoadBinding(scope.Locals[index], expected, ctx);
         var value = scope.Ambient[index - scope.Locals.Count];
         return EmitAmbient(value, expected, ctx);
     }
 
+    /// <summary>Leaves a local of this method on the stack.</summary>
+    private static Cty LocalValue(Ctx ctx, Binding.Local local)
+    {
+        ctx.Il.Emit(OpCodes.Ldloc, ctx.Locals[local.Slot]);
+        return local.Ty;
+    }
+
+    /// <summary>Leaves what a binder names on the stack.</summary>
+    private Cty LoadBinding(Binding binding, Cty expected, Ctx ctx) => binding switch
+    {
+        Binding.Local local when local.Owner == ctx.Id =>
+            Convert(LocalValue(ctx, local), expected, ctx),
+        Binding.Env env when env.Owner == ctx.Id =>
+            Convert(Exact(LoadEnviron(ctx, env.Slot), env.Ty, ctx), expected, ctx),
+        Binding.Member member =>
+            Convert(LoadMember(member, ctx), expected, ctx),
+        Binding.MethodRef method => EmitMethodValue(method, expected, ctx),
+        Binding.Nominal nominal when nominal.Former is null => EmitNominalValue(nominal.Decl, expected, ctx),
+        Binding.Nominal { Former: { } former } => EmitMethodValue(former, expected, ctx),
+        Binding.Ctor ctor => EmitCtorValue(ctor.Constructor, expected, ctx),
+        // A value of another method that the closure conversion did not thread is an emitter
+        // bug, not an unported shape: it must be loud, never a silent wrong answer.
+        Binding.Local or Binding.Env => throw new InvalidOperationException("a captured local was not threaded into the closure"),
+        _ => throw new InvalidOperationException(),
+    };
+
+    /// <summary>
+    /// A captured value back at the shape it was captured at. The cast is exact by
+    /// construction -- <see cref="EmitCaptures"/> boxed a value of this very shape -- where
+    /// <see cref="Convert"/>'s object-to-delegate path cannot be: the object tier keeps no
+    /// shape for a delegate.
+    /// </summary>
+    private static Cty Exact(Cty from, Cty to, Ctx ctx)
+    {
+        if (from == to) return to;
+        ctx.Il.Emit(from is Cty.Obj && to is Cty.I64 ? OpCodes.Unbox_Any : OpCodes.Castclass, to.Clr());
+        return to;
+    }
+
+    /// <summary>One captured value out of the current closure object's environment, boxed.</summary>
+    private static Cty LoadEnviron(Ctx ctx, int slot)
+    {
+        ctx.Il.Emit(OpCodes.Ldarg_0);
+        ctx.Il.Emit(OpCodes.Ldfld, ctx.Env!);
+        ctx.Il.Emit(OpCodes.Ldc_I4, slot);
+        ctx.Il.Emit(OpCodes.Ldelem_Ref);
+        return Cty.O;
+    }
+
+    private static Cty LoadMember(Binding.Member member, Ctx ctx)
+    {
+        LocalValue(ctx, member.Container);
+        ctx.Il.Emit(OpCodes.Ldstr, member.Name);
+        ctx.Il.Emit(OpCodes.Call, RuntimeMember);
+        return Cty.O;
+    }
+
     // let x : A = def in body. A function-shaped definition is a known method, so
     // its body calls it directly and only a use as a value builds a delegate.
-    private Cty EmitLet(Term.Let let, Cty expected, Scope scope, Ctx ctx, bool tail)
+    private Cty EmitLet(Term.Let let, Cty expected, Scope scope, Ctx ctx, bool tail) =>
+        Emit(let.Body, expected, scope.Push(Bind(let.Type, let.Def, scope, ctx)), ctx, tail);
+
+    /// <summary>Emits a definition and says what its binder names.</summary>
+    private Binding Bind(Term type, Term def, Scope scope, Ctx ctx)
     {
-        var ty = ShapeOfTerm(let.Type);
+        var ty = ShapeOfTerm(type);
         // An enum declaration binds a type, and the emitter knows which one: the
         // constructors are read off the declaration, so nothing is evaluated and no
         // local is needed. A use in a value position materialises it on demand.
-        if (let.Def is Term.Nominal nominal)
-            return Emit(let.Body, expected, scope.Push(new Binding.Nominal(nominal.Decl, Cty.O, null)), ctx, tail);
-        if (let.Def is Term.Fix fix)
+        if (def is Term.Nominal nominal)
+            return new Binding.Nominal(nominal.Decl, Cty.O, null);
+        if (def is Term.Fix fix)
+            return FormerOf(new Binding.MethodRef(EnsureFixMember(fix, fix.Index, ty, scope), ty), fix.Members[fix.Index].Body);
+        if (def is Term.Lam lam && ty is Cty.Fn fn)
         {
-            var method = EnsureFixMember(fix, fix.Index, ty, scope);
-            var value = new Binding.MethodRef(method, ty);
-            return Emit(let.Body, expected, scope.Push(FormerOf(value, fix.Members[fix.Index].Body)), ctx, tail);
+            var info = EnsureLambda(lam, fn, scope);
+            if (info.Closure is null)
+                return FormerOf(new Binding.MethodRef(info.Method, ty), lam.Body);
         }
-        if (let.Def is Term.Lam lam && ty is Cty.Fn fn)
-        {
-            var method = EnsureLambda(lam, fn, scope);
-            var value = new Binding.MethodRef(method, ty);
-            return Emit(let.Body, expected, scope.Push(FormerOf(value, lam.Body)), ctx, tail);
-        }
+        return BindLocal(def, ty, scope, ctx);
+    }
+
+    /// <summary>Evaluates <paramref name="def"/> into a local of <paramref name="ty"/>.</summary>
+    private Binding.Local BindLocal(Term def, Cty ty, Scope scope, Ctx ctx)
+    {
         var local = ctx.Il.DeclareLocal(ty.Clr());
-        var produced = Emit(let.Def, ty, scope, ctx, tail: false);
-        Convert(produced, ty, ctx);
+        Convert(Emit(def, ty, scope, ctx, tail: false), ty, ctx);
         ctx.Il.Emit(OpCodes.Stloc, local);
-        return Emit(let.Body, expected, scope.Push(new Binding.Local(ctx.Id, ctx.AddLocal(local), ty)), ctx, tail);
+        return new Binding.Local(ctx.Id, ctx.AddLocal(local), ty);
     }
 
     private Cty EmitLam(Term.Lam lam, Cty expected, Scope scope, Ctx ctx)
@@ -237,11 +343,43 @@ internal sealed partial class Emitter
         // docs/wayfinder/tickets/elaborator-records-term-types.md lands, at which point every
         // lambda here has a written or recovered signature.
         var fn = expected as Cty.Fn ?? Cty.ObjFn;
-        var method = EnsureLambda(lam, fn, scope);
-        ctx.Il.Emit(OpCodes.Ldnull);
-        ctx.Il.Emit(OpCodes.Ldftn, method);
+        return EmitLambdaValue(lam, fn, scope, ctx, expected);
+    }
+
+    /// <summary>
+    /// A lambda used as a value: a delegate over its generated method. A capturing lambda's
+    /// method is an instance method, so its closure object is built here from the values it
+    /// captures out of this method's locals and environment.
+    /// </summary>
+    private Cty EmitLambdaValue(Term.Lam lam, Cty.Fn fn, Scope scope, Ctx ctx, Cty expected)
+    {
+        var info = EnsureLambda(lam, fn, scope);
+        if (info.Closure is null)
+            ctx.Il.Emit(OpCodes.Ldnull);
+        else
+        {
+            EmitCaptures(info.Captures, ctx);
+            ctx.Il.Emit(OpCodes.Newobj, info.Ctor!);
+            // No `dup`: `ldftn` needs the instance on the stack but does not consume it --
+            // it is the delegate constructor's first argument (Roslyn's shape for `o.M`).
+        }
+        ctx.Il.Emit(OpCodes.Ldftn, info.Method);
         ctx.Il.Emit(OpCodes.Newobj, DelegateCtor(fn));
         return Convert(fn, expected, ctx);
+    }
+
+    /// <summary>One <c>object[]</c> of the values a lambda captures, in capture order.</summary>
+    private void EmitCaptures(List<(int Index, Binding Original)> captures, Ctx ctx)
+    {
+        ctx.Il.Emit(OpCodes.Ldc_I4, captures.Count);
+        ctx.Il.Emit(OpCodes.Newarr, typeof(object));
+        for (var i = 0; i < captures.Count; i++)
+        {
+            ctx.Il.Emit(OpCodes.Dup);
+            ctx.Il.Emit(OpCodes.Ldc_I4, i);
+            Convert(LoadBinding(captures[i].Original, Cty.O, ctx), Cty.O, ctx);
+            ctx.Il.Emit(OpCodes.Stelem_Ref);
+        }
     }
 
     private Cty EmitApply(Term.Ap ap, Cty expected, Scope scope, Ctx ctx, bool tail)
@@ -258,14 +396,22 @@ internal sealed partial class Emitter
             return EmitCall(mr.Method, fn.Ret, expected, ctx, tail);
         }
 
-        // A lambda literal applied at once: a direct call to its method, no delegate.
+        // A lambda literal applied at once: a direct call to its method, no delegate when it
+        // captures nothing; otherwise its closure object and the delegate's Invoke, never the
+        // object tier's `Runtime.Apply`, so the parameter keeps its shape.
         if (ap.Fn is Term.Lam lam)
         {
             var param = Natural(ap.Arg, scope);
             var fn = new Cty.Fn(param, expected);
-            var method = EnsureLambda(lam, fn, scope);
+            var info = EnsureLambda(lam, fn, scope);
+            if (info.Closure is null)
+            {
+                Emit(ap.Arg, param, scope, ctx, tail: false);
+                return EmitCall(info.Method, fn.Ret, expected, ctx, tail);
+            }
+            EmitLambdaValue(lam, fn, scope, ctx, fn);
             Emit(ap.Arg, param, scope, ctx, tail: false);
-            return EmitCall(method, fn.Ret, expected, ctx, tail);
+            return EmitInvoke(fn, expected, ctx, tail);
         }
 
         var callee = Natural(ap.Fn, scope);
@@ -273,15 +419,7 @@ internal sealed partial class Emitter
         {
             Emit(ap.Fn, shape, scope, ctx, tail: false);
             Emit(ap.Arg, shape.Param, scope, ctx, tail: false);
-            var invoke = shape.Clr().GetMethod("Invoke")!;
-            if (tail && shape.Ret == ctx.Ret)
-            {
-                ctx.Il.Emit(OpCodes.Tailcall);
-                ctx.Il.Emit(OpCodes.Callvirt, invoke);
-                return ctx.Ret;
-            }
-            ctx.Il.Emit(OpCodes.Callvirt, invoke);
-            return Convert(shape.Ret, expected, ctx);
+            return EmitInvoke(shape, expected, ctx, tail);
         }
         if (callee is Cty.Obj)
         {
@@ -291,6 +429,20 @@ internal sealed partial class Emitter
             return Convert(Cty.O, expected, ctx);
         }
         throw new NotImplementedException("not ported yet: backend applied non-function");
+    }
+
+    /// <summary>A call of a delegate already on the stack, with its argument below it.</summary>
+    private static Cty EmitInvoke(Cty.Fn fn, Cty expected, Ctx ctx, bool tail)
+    {
+        var invoke = fn.Clr().GetMethod("Invoke")!;
+        if (tail && fn.Ret == ctx.Ret)
+        {
+            ctx.Il.Emit(OpCodes.Tailcall);
+            ctx.Il.Emit(OpCodes.Callvirt, invoke);
+            return ctx.Ret;
+        }
+        ctx.Il.Emit(OpCodes.Callvirt, invoke);
+        return Convert(fn.Ret, expected, ctx);
     }
 
     private Cty EmitCall(MethodBuilder method, Cty ret, Cty expected, Ctx ctx, bool tail)
@@ -384,22 +536,106 @@ internal sealed partial class Emitter
         return expected;
     }
 
+    private static readonly ConstructorInfo AtomCtor = typeof(Runtime.Atom).GetConstructor([typeof(string)])!;
+
+    private static readonly MethodInfo RuntimeMember =
+        typeof(Runtime).GetMethod(nameof(Runtime.MemberOf))!;
+
+    private static readonly MethodInfo RuntimeProject =
+        typeof(Runtime).GetMethod(nameof(Runtime.Project))!;
+
     private static long I64Key(Atom key) =>
         key is Atom.I64 n ? n.Value : throw new NotImplementedException($"not ported yet: backend switch key {key.GetType().Name}");
 
     // ---- functions ----------------------------------------------------------
 
-    private MethodBuilder EnsureLambda(Term.Lam lam, Cty.Fn fn, Scope enclosing)
+    /// <summary>
+    /// Emits — or returns the already emitted — method for a lambda, plus the class that holds
+    /// its captures. A lambda that reads nothing from the enclosing method stays a static
+    /// method: that is why the prelude value graph needs no closure object. One that reads a
+    /// local does not, so its body becomes an instance method over a generated class holding
+    /// one <c>object[]</c> of captured values, and the delegate is built over that instance.
+    /// </summary>
+    // shortcut: one array field rather than one field per captured value, and everything the
+    // enclosing method's scope holds is captured rather than only what the body reads -- a capture
+    // costs an array, an entry per enclosing local, and boxing. Upgrade when a program's captures
+    // show up in a profile.
+    private LambdaInfo EnsureLambda(Term.Lam lam, Cty.Fn fn, Scope enclosing)
     {
-        if (_lambdas.TryGetValue(lam, out var existing)) return existing;
-        var method = DefineFnMethod(fn);
-        _lambdas[lam] = method;
-        var ctx = new Ctx(method.GetILGenerator(), _methodSeq++, fn.Ret);
-        var parameter = LoadParameter(fn, ctx);
-        var body = Emit(lam.Body, fn.Ret, enclosing.Push(parameter), ctx, tail: true);
+        if (_lambdas.TryGetValue((lam, fn), out var existing)) return existing;
+
+        var captures = CaptureSlots(enclosing);
+        var ctxId = _methodSeq++;
+        TypeBuilder? closure = null;
+        ConstructorBuilder? ctor = null;
+        MethodBuilder method;
+        FieldBuilder? env = null;
+        if (captures.Count == 0)
+            method = DefineFnMethod(fn);
+        else
+        {
+            closure = _module.DefineType($"Closure_{_nameSeq++}", TypeAttributes.NotPublic | TypeAttributes.Sealed);
+            env = closure.DefineField("Env", typeof(object[]), FieldAttributes.Public);
+            ctor = closure.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig,
+                CallingConventions.Standard, [typeof(object[])]);
+            var cil = ctor.GetILGenerator();
+            cil.Emit(OpCodes.Ldarg_0);
+            cil.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+            cil.Emit(OpCodes.Ldarg_0);
+            cil.Emit(OpCodes.Ldarg_1);
+            cil.Emit(OpCodes.Stfld, env);
+            cil.Emit(OpCodes.Ret);
+            method = closure.DefineMethod("Invoke", MethodAttributes.Public | MethodAttributes.HideBySig,
+                fn.Ret.Clr(), [fn.Param.Clr()]);
+        }
+
+        var info = new LambdaInfo(method, captures, closure, ctor);
+        // Cached before the body: a lambda that mentions itself, or a sibling defined later,
+        // finds it already defined.
+        _lambdas[(lam, fn)] = info;
+
+        var ctx = new Ctx(method.GetILGenerator(), ctxId, fn.Ret) { Env = env };
+        // The captures keep their positions in the scope list, so every de Bruijn index -- and
+        // therefore every ambient index -- still means what the elaborator decided it means.
+        var locals = enclosing.Locals;
+        for (var slot = 0; slot < captures.Count; slot++)
+            locals = locals.SetItem(captures[slot].Index, new Binding.Env(ctxId, slot, captures[slot].Original.Ty));
+        var scope = new Scope(enclosing.Ambient) { Locals = locals };
+        var parameter = LoadParameter(fn, ctx, offset: closure is null ? 0 : 1);
+        var body = Emit(lam.Body, fn.Ret, scope.Push(parameter), ctx, tail: true);
         Convert(body, fn.Ret, ctx);
         ctx.Il.Emit(OpCodes.Ret);
-        return method;
+        if (closure is not null) _closuresToCreate.Add(closure);
+        return info;
+    }
+
+    /// <summary>
+    /// The values a method generated here cannot reach on its own: the enclosing method's own
+    /// locals and its environment entries. Every captured value is a boxed entry of the new
+    /// closure's <c>object[]</c>, in list order.
+    /// </summary>
+    private static List<(int Index, Binding Original)> CaptureSlots(Scope enclosing)
+    {
+        // The innermost method owns whichever entries come first that belong to a method at
+        // all; entries owned by a method further out are unreachable from the new lambda -- and
+        // unreachable from the enclosing body too, which is why they never get captured twice.
+        var owner = enclosing.Locals.FirstOrDefault(b => b is Binding.Local or Binding.Env) switch
+        {
+            Binding.Local local => local.Owner,
+            Binding.Env env => env.Owner,
+            _ => (int?)null,
+        };
+        if (owner is null) return [];
+        var captures = new List<(int Index, Binding Original)>();
+        for (var i = 0; i < enclosing.Locals.Count; i++)
+            if (enclosing.Locals[i] switch
+                {
+                    Binding.Local local => local.Owner == owner,
+                    Binding.Env env => env.Owner == owner,
+                    _ => false,
+                })
+                captures.Add((i, enclosing.Locals[i]));
+        return captures;
     }
 
     private MethodBuilder EnsureFixMember(Term.Fix fix, int index, Cty ty, Scope enclosing)
@@ -413,6 +649,10 @@ internal sealed partial class Emitter
         if (_fixMembers.TryGetValue(member, out var existing)) return existing;
         if (ty is not Cty.Fn fn || member.Body is not Term.Lam lam)
             throw new NotImplementedException("not ported yet: backend recursive value");
+        // A `rec` whose body reads an enclosing method's local would need the same closure
+        // object every member shares; it is refused rather than emitted unreachable.
+        if (enclosing.Locals.Any(b => b is Binding.Local or Binding.Env))
+            throw new NotImplementedException("not ported yet: backend captured local");
         var method = DefineFnMethod(fn);
         // Cache before emitting the body: a sibling's body refers back to this one.
         _fixMembers[member] = method;
@@ -438,9 +678,9 @@ internal sealed partial class Emitter
     private static Binding FormerOf(Binding.MethodRef value, Term body) =>
         LamChain(body).Body is Term.Nominal declared ? new Binding.Nominal(declared.Decl, value.Ty, value) : value;
 
-    private static Binding LoadParameter(Cty.Fn fn, Ctx ctx)
+    private static Binding LoadParameter(Cty.Fn fn, Ctx ctx, int offset = 0)
     {
-        ctx.Il.Emit(OpCodes.Ldarg_0);
+        ctx.Il.Emit(OpCodes.Ldarg, (short)offset);
         var local = ctx.Il.DeclareLocal(fn.Param.Clr());
         ctx.Il.Emit(OpCodes.Stloc, local);
         return new Binding.Local(ctx.Id, ctx.AddLocal(local), fn.Param);
@@ -450,8 +690,6 @@ internal sealed partial class Emitter
     {
         if (method.Ty is not Cty.Fn fn)
             throw new NotImplementedException("not ported yet: backend non-function value");
-        if (expected is Cty.Obj && fn != Cty.ObjFn)
-            throw new NotImplementedException("not ported yet: backend untyped function value");
         ctx.Il.Emit(OpCodes.Ldnull);
         ctx.Il.Emit(OpCodes.Ldftn, method.Method);
         ctx.Il.Emit(OpCodes.Newobj, DelegateCtor(fn));
@@ -475,6 +713,8 @@ internal sealed partial class Emitter
         Term.Ap ap when IsPrimitive(ap, scope) => Cty.L,
         Term.Ap ap => Natural(ap.Fn, scope) is Cty.Fn fn ? fn.Ret : Cty.O,
         Term.Let let => ShapeOfTerm(let.Type),
+        // A spliced unit's value carries its own shape.
+        Term.Imported imported => ShapeOfValue(imported.Value),
         _ => Cty.O,
     };
 
@@ -504,17 +744,18 @@ internal sealed partial class Emitter
     private static Cty Convert(Cty from, Cty to, Ctx ctx)
     {
         if (from == to) return to;
+        // A delegate is already an object, and a boxed long is not: only the atom needs IL.
         if (to is Cty.Obj)
         {
             if (from is Cty.I64) ctx.Il.Emit(OpCodes.Box, typeof(long));
-            else if (from is Cty.Fn fn && fn != Cty.ObjFn)
-                throw new NotImplementedException("not ported yet: backend untyped function value");
             return to;
         }
         if (from is Cty.Obj)
         {
             if (to is Cty.I64) ctx.Il.Emit(OpCodes.Unbox_Any, typeof(long));
-            else if (to is Cty.Fn objFn && objFn == Cty.ObjFn) ctx.Il.Emit(OpCodes.Castclass, objFn.Clr());
+            // Only the universal shape can be read back out of the object tier: a delegate
+            // stored there keeps its own shape, and the object tier does not record which.
+            else if (to is Cty.Fn fn && fn == Cty.ObjFn) ctx.Il.Emit(OpCodes.Castclass, fn.Clr());
             else throw new NotImplementedException($"not ported yet: backend conversion object -> {to.GetType().Name}");
             return to;
         }

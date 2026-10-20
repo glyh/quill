@@ -42,10 +42,18 @@ internal sealed partial class Emitter
         // its erased type parameter, and the value it denotes is the constructor itself.
         Value v when AmbientCtor(v) is { } ctor => EmitCtorValue(ctor, Cty.O, ctx),
         Value.VAtom { Atom: Atom.I64 n } => EmitI64Value(n.Value, ctx),
+        Value.VAtom atom => EmitAtomText(atom.Atom.ToString(), ctx),
         Value.VAtomTy { Ty: var ty } => EmitAtomTypeValue(ty, Cty.O, ctx),
         Value.VNominal nominal => EmitNominalValue(nominal.Decl, Cty.O, ctx),
         Value.VCon con => EmitConValue(con, ctx),
         Value.VLam lam => EmitClosureValue(lam.Body, Cty.ObjFn, ctx),
+        // The structural values: a module or struct (an imported unit's value is one), a
+        // record, a tuple.
+        Value.VModule module => EmitModuleValue(module.Entries, module.Partial, isStruct: false, ctx),
+        Value.VStruct st => EmitModuleValue(st.Entries, st.Partial, isStruct: true, ctx),
+        Value.VRecord record => EmitRecordValue(record, ctx),
+        Value.VProd prod => EmitTupleValue(prod.Items, isType: false, ctx),
+        Value.VProdTy prodTy => EmitTupleValue(prodTy.Items, isType: true, ctx),
         _ => throw new NotImplementedException($"not ported yet: backend prelude value ({value.GetType().Name})"),
     };
 

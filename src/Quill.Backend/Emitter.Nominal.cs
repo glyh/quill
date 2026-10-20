@@ -161,36 +161,4 @@ internal sealed partial class Emitter
         ctx.Il.Emit(OpCodes.Ldloc, args);
         ctx.Il.Emit(OpCodes.Newobj, ConCtor);
     }
-
-    // ---- open and dot -------------------------------------------------------
-
-    /// <summary>
-    /// <c>open T</c> over a nominal binds its constructors by name. Over a <em>former</em>
-    /// the elaborator binds <c>fn(A1…Ak) { T(A1…Ak).C }</c> (<c>Nbe.Enum.cs</c>), and the
-    /// wrapper is erased along with every other type parameter: what is left is the
-    /// constructor itself, which is what a use site's explicit spine saturates.
-    /// </summary>
-    private Cty EmitOpen(Term.Open open, Cty expected, Scope scope, Ctx ctx, bool tail)
-    {
-        if (NominalOf(open.Of, scope) is not { } decl)
-            throw new NotImplementedException($"not ported yet: backend open of {open.Of.GetType().Name}");
-        var inner = scope;
-        foreach (var member in open.Members)
-        {
-            if (member is not OpenMember.Constructor ctor)
-                throw new NotImplementedException($"not ported yet: backend open member {member.GetType().Name}");
-            var constructor = decl.Constructor(ctor.Name)
-                ?? throw new InvalidOperationException($"`{decl.Name}` has no constructor `{ctor.Name}`");
-            inner = inner.Push(new Binding.Ctor(decl, constructor));
-        }
-        return Emit(open.Body, expected, inner, ctx, tail);
-    }
-
-    /// <summary><c>T.C</c> over a nominal is that constructor; a member of a record is not ported.</summary>
-    private Cty EmitDot(Term.Dot dot, Cty expected, Scope scope, Ctx ctx)
-    {
-        if (NominalOf(dot.Of, scope) is { } decl && decl.Constructor(dot.Name) is { } constructor)
-            return EmitCtorValue(constructor, expected, ctx);
-        throw new NotImplementedException($"not ported yet: backend Dot :: {dot}");
-    }
 }

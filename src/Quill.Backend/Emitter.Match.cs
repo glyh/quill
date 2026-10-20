@@ -187,12 +187,12 @@ internal sealed partial class Emitter
 /// </summary>
 /// <remarks>
 /// <b>What it reads is the <em>emitted</em> tier, not the interpreter's.</b> A constructor in
-/// emitted code is <see cref="Runtime.Con"/> (name and payloads), never <see cref="Quill.Kernel.Value.VCon"/>:
-/// <c>Value</c> belongs to the evaluator and never appears in a running program's heap. Reading
-/// <c>VCon</c> here built and passed xUnit and failed only at run time, on the cases that
-/// actually reach a <c>Destruct</c>. <see cref="ConstructorName"/> and <see cref="Payload"/> both
-/// read the emitted tier now; <see cref="ProdItem"/> and <see cref="Field"/> still read the
-/// evaluator's, and are unreachable only until 1c-ii emits a struct or a tuple.
+/// emitted code is <see cref="Runtime.Con"/>, a tuple <see cref="Runtime.Prod"/>, a record
+/// <see cref="Runtime.Record"/>: <c>Value</c> belongs to the evaluator and never appears in a
+/// running program's heap. Reading <c>VCon</c> here built and passed xUnit and failed only at run
+/// time, on the cases that actually reach a <c>Destruct</c>; <see cref="ProdItem"/> and
+/// <see cref="Field"/> read <c>VProd</c>/<c>VRecord</c> for the same reason and were unreachable
+/// only until 1c-ii emitted a tuple or a record.
 /// </remarks>
 /// <remarks>
 /// <b>Must stay <c>public</c>, like <see cref="Runtime"/> and for the same reason:</b> the
@@ -221,15 +221,19 @@ public static class MatchOps
     /// <summary>The element at an index of a tuple or tuple type.</summary>
     public static object ProdItem(object value, int index) => value switch
     {
-        Value.VProd prod => prod.Items[index],
-        Value.VProdTy prodTy => prodTy.Items[index],
+        Runtime.Prod prod => prod.Items[index],
+        Runtime.ProdTy prodTy => prodTy.Items[index],
         _ => throw new InvalidOperationException($"a match reached a {value?.GetType().Name ?? "null"} its type rules out"),
     };
 
-    /// <summary>The last field with a name, as the interpreter reads a record.</summary>
+    /// <summary>
+    /// The <em>last</em> field with a name, as a pattern binding reads a record
+    /// (<c>Nbe.Match.cs</c>'s field occurrence). A dot expression reads the first: the two are
+    /// deliberately different in the interpreter, so they are different here.
+    /// </summary>
     public static object Field(object value, string name) => value switch
     {
-        Value.VRecord record => record.Fields.Last(field => field.Name == name).Value,
+        Runtime.Record record => record.Fields.Last(field => field.Name == name).Value,
         _ => throw new InvalidOperationException($"a match reached a {value?.GetType().Name ?? "null"} its type rules out"),
     };
 }

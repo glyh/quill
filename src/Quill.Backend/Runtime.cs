@@ -1,4 +1,5 @@
 using Quill.Compiler;
+using Quill.Kernel;
 
 namespace Quill.Backend;
 
@@ -34,6 +35,35 @@ public static class Runtime
     public sealed record AtomType(string Name);
 
     /// <summary>
+    /// One member of a container: a struct's constructor field (its <em>type</em>, not a
+    /// value), a module's or a struct's binding. The emitted counterpart of
+    /// <see cref="Quill.Kernel.ModuleEntry"/>.
+    /// </summary>
+    public sealed record Member(string? Name, MemberKind Kind, object Value);
+
+    /// <summary>A module: its members in binding order. The counterpart of <see cref="Quill.Kernel.Value.VModule"/>.</summary>
+    public sealed record Module(Member[] Members, bool Partial);
+
+    /// <summary>A struct type: constructor fields first, then its bindings. The counterpart of <see cref="Quill.Kernel.Value.VStruct"/>.</summary>
+    public sealed record Struct(Member[] Members, bool Partial);
+
+    /// <summary>A record, with the struct it is an instance of. The counterpart of <see cref="Quill.Kernel.Value.VRecord"/>.</summary>
+    public sealed record Record(object Type, Member[] Fields);
+
+    /// <summary>
+    /// An atom that has no IL shape of its own -- <c>Unit</c>, a character, a string. The
+    /// counterpart of <see cref="Quill.Kernel.Value.VAtom"/>; an <c>I64</c> never becomes one,
+    /// because it is a <c>long</c> here.
+    /// </summary>
+    public sealed record Atom(string Text);
+
+    /// <summary>A tuple. The counterpart of <see cref="Quill.Kernel.Value.VProd"/>.</summary>
+    public sealed record Prod(object[] Items);
+
+    /// <summary>A tuple type. The counterpart of <see cref="Quill.Kernel.Value.VProdTy"/>.</summary>
+    public sealed record ProdTy(object[] Items);
+
+    /// <summary>
     /// The self-imposed recursion ceiling. The CLR dies with an uncatchable stack
     /// overflow at ~250k trivial frames (docs/wayfinder/topics/dotnet-backend.md), so the
     /// guard must sit well under that; emitted frames are larger than the probe's.
@@ -58,7 +88,51 @@ public static class Runtime
     public static void Exit() => _depth--;
 
     /// <summary>Calls a function value of unknown C# shape: the object tier's application.</summary>
-    public static object Apply(object fn, object arg) => ((Func<object, object>)fn)(arg);
+    // shortcut: a delegate whose shape is not (object -> object) is called through
+    // DynamicInvoke, because the object tier keeps no shape for it. Upgrade when a profile shows
+    // the object tier on a hot path; the typed tier calls `Invoke` directly.
+    public static object Apply(object fn, object arg) => fn switch
+    {
+        Func<object, object> f => f(arg),
+        Delegate d => d.DynamicInvoke(arg)!, // an object-tier callee always returns a value
+        _ => throw new FunException($"applying non-function: {fn?.GetType().Name ?? "null"}"),
+    };
+
+    /// <summary>
+    /// <c>e.name</c>: a member by label. Mirrors <see cref="Quill.Compiler.Nbe.DotValue"/> --
+    /// the last visible member of a module or struct (I3), and a record's <em>first</em> field of
+    /// that name, falling back to a method of its type applied to it.
+    /// </summary>
+    public static object MemberOf(object container, string name) => container switch
+    {
+        Module m => Visible(m.Members, name),
+        Struct s => Visible(s.Members, name),
+        // `FirstOrDefault`, as Nbe's record case reads it: a record field shadows a method.
+        Record r => First(r.Fields, name) is { Value: { } field } ? field : MethodOf(r, name),
+        // A type value carries its name and nothing else (see Nominal above), so a constructor
+        // reached through one -- `M.A.MkA`, `b(I64).X` -- has no table to read.
+        Nominal => throw new NotImplementedException("not ported yet: backend constructor through a type value"),
+        _ => throw new FunException($"member access `.{name}` on a non-module"),
+    };
+
+    /// <summary>The element at an index of a tuple or a tuple type. Mirrors <c>Nbe</c>'s <c>Project</c>.</summary>
+    public static object Project(object of, int index) => of switch
+    {
+        Prod p => p.Items[index],
+        ProdTy t => t.Items[index],
+        _ => throw new FunException("projection of a non-tuple"),
+    };
+
+    /// <summary>A record's method: a member of its type, applied to the record.</summary>
+    private static object MethodOf(Record record, string name) => Apply(MemberOf(record.Type, name), record);
+
+    private static Member? First(Member[] members, string name) =>
+        members.FirstOrDefault(m => m.Name == name);
+
+    /// <summary>The last member of that name reachable from outside (I3).</summary>
+    private static object Visible(Member[] members, string name) =>
+        members.LastOrDefault(m => m.Name == name && Nbe.Visible(m.Kind))?.Value
+            ?? throw new FunException($"no member `{name}`");
 
     /// <summary>
     /// What a program produced, as far as the conformance suite may observe it:
@@ -71,6 +145,14 @@ public static class Runtime
     {
         long n => n.ToString(),
         Con c => c.Name,
+        // Parity compares this string against the interpreter's, so a shape the interpreter
+        // renders by its own constructor keeps that spelling rather than this assembly's.
+        Atom => "VAtom",
+        Prod => "VProd",
+        ProdTy => "VProdTy",
+        Record => "VRecord",
+        Module => "VModule",
+        Struct => "VStruct",
         _ => value.GetType().Name,
     };
 
