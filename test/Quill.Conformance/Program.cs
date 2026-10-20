@@ -28,8 +28,9 @@ if (args is ["--case", var casePath])
 }
 
 // --parity: run every case whose .expect is not "ok" through Backend.Run beside
-// Driver.Run and report match / differ / not-ported. It is the backend slice's
-// evidence, not a pass/fail gate, so it never changes the default mode's verdict.
+// Driver.Run and report match / differ / not-ported. A non-zero exit means at least one
+// case differed: a backend that disagrees with the interpreter is a failure, not a
+// statistic. `not ported` is expected while slices are unfinished and does not fail it.
 if (args.Contains("--parity"))
     return RunParity(CasesRoot([.. args.Where(a => a != "--parity")]));
 
@@ -208,7 +209,7 @@ static int RunParity(string root)
     foreach (var (kind, n) in kinds.OrderByDescending(k => k.Value))
         Console.WriteLine($"  NOTPORTED {n,4}  {kind}");
     Console.WriteLine($"parity: {match + differ + notPorted} cases, {match} match, {differ} differ, {notPorted} not ported");
-    return 0;
+    return differ == 0 ? 0 : 1;
 }
 
 // One path's outcome: the value it produced, or the exception it threw.
@@ -250,6 +251,8 @@ static string CasesRoot(string[] args)
 //   HANG         the run did not finish within 60s
 // The accounting stays honest: an unported path is a failure, an invariant
 // failure is a failure, and neither passes a program expecting `error`.
+// It always exits 0, deliberately: the verdict is the tag on the line it prints, and the
+// probe is often aimed at a program that *should* fail, so its exit status is not one.
 static int RunFile(string path)
 {
     var full = Path.GetFullPath(path);

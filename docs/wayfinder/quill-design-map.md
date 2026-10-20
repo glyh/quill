@@ -433,11 +433,13 @@ halves**, and three tickets were filed from it:
   unreachable today (`Runtime.Con` has no payloads) and an unexercisable fix is the kind that looks
   verified and is not. It detonates at run time inside emitted code the moment 1c adds payloads.
 - **[`--parity` exits 0 when it found differs](tickets/parity-exits-zero-on-differ.md)** —
-  `RunParity` ends `return 0;` unconditionally, so the one mode that can see a backend/interpreter
-  disagreement reports success to everything but a human reading stdout. Both seam bugs were
-  invisible to `build`, xUnit and the default runner mode; only a human-read `--parity` line found
-  them. Half a day after the mode's coverage fix (`59894d6`) paid for itself, this is the other half
-  of making it usable as a gate.
+  **closed 2026-10-20**, same session it was filed in. `RunParity` ended `return 0;`
+  unconditionally, so the one mode that can see a backend/interpreter disagreement reported
+  success to everything but a human reading stdout; it now ends `return differ == 0 ? 0 : 1;`,
+  with `not ported` deliberately not failing the run. Both seam bugs were invisible to `build`,
+  xUnit and the default runner mode; only a human-read `--parity` line found them. Half a day
+  after the mode's coverage fix (`59894d6`) paid for itself, this was the other half of making
+  it usable as a gate.
 
 **Suite, xUnit and parity are the integrator's own run**, at the merge of both 1b halves. Slice
 1b's own reconnaissance is in its ticket.

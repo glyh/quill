@@ -50,9 +50,10 @@ not exist yet.
   elaboration-time annotation table is
   [still owed](wayfinder/tickets/elaborator-records-term-types.md)); `Term.Module`, `Term.Imported`
   and `Term.InsertedMeta` (no emitting case and no owning slice; `Module` 112 and `Imported` 37
-  first-failures); and `quill build`. Two gaps are filed rather than fixed:
-  [`MatchOps.Payload` reads the evaluator's tier](wayfinder/tickets/backend-matchops-payload-wrong-tier.md)
-  and [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md).
+  first-failures); and `quill build`. One gap is filed rather than fixed:
+  [`MatchOps.Payload` reads the evaluator's tier](wayfinder/tickets/backend-matchops-payload-wrong-tier.md).
+  [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md) is **closed**
+  (2026-10-20): the mode now exits 1 the moment `differ > 0`, so it can be a gate.
 
 ### The rest of the session's landings (2026-09-28)
 

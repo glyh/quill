@@ -3,7 +3,9 @@ title: --parity exits 0 when it found differs
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-20
+resolution: Closed 2026-10-20. `RunParity` now ends `return differ == 0 ? 0 : 1;` and the mode's dispatch comment (`Program.cs:30`) states the contract where the code is — non-zero means a differ, `not ported` is expected while slices are unfinished and never fails the run. Item 2 checked: `--case` already returns 1 on fail; `RunFile` returns 0 on *every* path deliberately, because its verdict is the tag on the printed line (`VALUE`/`ELAB`/`EVAL`/`HANG`) and the probe is usually aimed at a program that should fail — a comment now says so, so the next reader need not re-derive it (the default mode already returns `failures.Count == 0 ? 0 : 1`). Ablation evidence: forcing `Same` to `false` made every case a differ and the run `exit=1` (`parity: 900 cases, 235 match, 138 differ, 527 not ported`), ablation restored, `git diff` = this ticket's 6 lines in `Program.cs`. Gate on the restored tree: `build` 0 errors, `--parity` `exit=0` at `0 differ` (900 cases, 373 match, 527 not ported), default suite **967 cases, 0 failed**, xUnit **217/217**. Note for anyone reading a pipeline: `… --parity | tail -1; echo $?` reports `tail`'s status, which is how this bug hid in the first place — check the exit without a pipe.
 assignee:
 blocked_by: []
 # Found 2026-10-19 by the integrator, in the same session the harness's coverage fix
