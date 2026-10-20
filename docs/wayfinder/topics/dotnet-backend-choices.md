@@ -272,7 +272,7 @@ Honest accounting, because one fork's work largely dies here.
 | `src/Quill.Backend/Emitter.cs` — the C#-text emitter | **dies**; rewritten as IL emission |
 | the Roslyn dependency and `CSharpCompilation` host | **dies**; no NuGet dependency left |
 | the emitter's *decisions* (what each `Term` becomes, how `Fix` groups and closures are laid out) | carries over as design, not as code |
-| the term-shapes survey | incomplete then — since written up in [the term-shapes topic](dotnet-backend-term-shapes.md), which 1a′–1c-i kept growing |
+| the term-shapes survey | incomplete then — since written up in [the term-shapes topic](dotnet-backend-term-shapes.md), which 1a′–1c-ii kept growing |
 
 **What happened to the two "not yet"s above, recorded rather than left standing** (2026-10-20):
 the fork's branch *was* read and run before merging — slice 1a′ landed 2026-10-17 with the

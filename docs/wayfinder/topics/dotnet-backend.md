@@ -170,6 +170,57 @@ the environment it was closed over. That is closure conversion over the value gr
 the reason the prelude needs no special case: prelude functions, trait dictionaries and
 structured records all arrive as values with terms inside them.
 
+## Emitting closures, and the two IL traps it cost (1c-ii, 2026-10-20)
+
+A lambda that reads nothing from the enclosing method stays a **static** method — that is what
+makes the prelude value graph, and its `tail.` prefixes, cost nothing. A lambda that reads a local
+cannot: its body becomes an **instance method of a generated class** holding one `object[]` of
+captured values (`Emitter.EnsureLambda`), and the delegate is built over that instance. Captures
+keep their *positions* in the scope list (`Binding.Env` replaces the entry in place), so every de
+Bruijn index, and every ambient index behind it, still means what the elaborator decided; that
+invariant is what let the slice land without touching `Var` resolution.
+
+Three things about the emitted tier that a reader needs before touching it: a lambda captures
+**everything the enclosing method's scope holds**, not only the free variables its body reads
+(cheap to emit, and a `shortcut:` in `EnsureLambda` says when to tighten it); a delegate stored in
+the **object** tier keeps its own `Func<…>` shape from the point it was emitted, so
+`Runtime.Apply` calls a non-`(object → object)` delegate through `DynamicInvoke`; and
+`Runtime.Describe` must render a structural value with the **interpreter's** spelling
+(`VModule`/`VStruct`/`VRecord`/`VProd`/`VAtom`), because `--parity` compares those two strings and
+a case whose result is a module or a tuple would otherwise report a `differ` that is only a name.
+
+Two things about writing that IL were not guessable and cost real time. Both are recorded because
+1d's machines will build delegates too.
+
+1. **`ldftn` on an instance method needs its `this` on the stack but does not consume it.** The
+   correct sequence is Roslyn's, and it has **no `dup`**:
+   `ldloc instance; ldftn instance M; newobj Delegate(object, native int)`. A `dup` (the reflex
+   from `ldvirtftn`/`callvirt` shapes) leaves one extra item on the stack, which surfaces as
+   `InvalidProgramException: Common Language Runtime detected an invalid program` **at the JIT of
+   the *enclosing* method** — the stack trace names `Program.Entry`, not the closure. Grinding on
+   the ordering of `TypeBuilder.CreateType` for a dependent type was a dead end: a minimal
+   Reflection.Emit repro in `/tmp` that emitted the same seven instructions settled it in one run,
+   and the IL the emitter had written was already textually identical to the answer.
+2. **`PersistedAssemblyBuilder` does not care when a dependent type is created**, so
+   "create the closure class first" is not a fix and "create it last" is not a bug. What it does
+   care about is that every `DefineType` is created before `Save`; `Emitter.Build` creates the
+   closure classes and then the enclosing type.
+
+### Seeing what the emitter wrote
+
+`QUILL_BACKEND_IL=<path> quill run <file.qll>` writes the emitted image out (`Emitter.cs`'s debug
+hook). There is no `ildasm` on `PATH`, but this machine has one built from the runtime tree:
+
+```sh
+QUILL_BACKEND_IL=/tmp/p.dll dotnet src/Quill.Cli/bin/Debug/net10.0/Quill.Cli.dll run prog.qll
+/home/lyh/pullground/runtime/artifacts/bin/coreclr/linux.x64.Checked/ildasm /tmp/p.dll
+```
+
+That, not a hypothesis about the term, is what shows whether a `tail.` survived, whether a local is
+`int64` or `object`, and which `Runtime.*` helper a path actually calls — the `+`-emitted-as-`Sub`
+bug of 1c-ii (an extra pushed field slot, see [the term-shapes topic](dotnet-backend-term-shapes.md))
+was visible as one line of disassembly and invisible in the source.
+
 ## Staging
 
 Each slice is separately verifiable and leaves the previous one working.
@@ -179,19 +230,27 @@ Each slice is separately verifiable and leaves the previous one working.
 | 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; **plus the one `Match` shape a recursion probe cannot be written without** (below); `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions a `CanTailcall`-style check accepts | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive. **Landed 2026-10-17:** all met, verified on the merged tree — `tail.` prefixes 1 (self) and 4 (mutual) in the emitted image, both 20M runs exit 0 |
 | 1b | the rest of `Match` over `DecisionTree`s (payload bindings, nominal keys, `Destruct`, guards, non-base occurrences), and prelude-function compilation from the value graph. **Landed 2026-10-19 in two halves** (1b-ii `926eb49`, 1b-i `b416d65`), residue closed 2026-10-20 (`cfc55e7`); `Sequential` and `TypeSwitch` deliberately out. Detail: [the slice ticket](../tickets/backend-slice-1b.md) | `fib(30)` → `832040`, and faster than the 13.6 s baseline. **Met by both spellings as of `cfc55e7`:** the `match` one was already met before 1b started (measured 2026-10-19: 0.6 s backend against 7.2 s interpreted at `e1b951a`), and the `if` one returns `832040` in 0.81 s now that its `Nominal` residue is closed. Read the earlier history in the ticket — this table got the gate wrong twice |
 | 1c-i | **the nominal tier**: `Runtime.Con` payloads, an enum declaration as a value *and* a declaration, `Term.Nominal`/`Term.Open`/`Term.Dot`/`Term.Con`, and a type (`VNominal`, `VAtomTy`) emitted as a value where a term demands one. **Landed 2026-10-20** — `--parity` 381 → 419 match, 140 → 178 value-match, 0 differ, `Nominal` refusals 44 → 0; `{ Color = enum { Red, Green }; open Color; match (Color.Green) { … } }` → 2, and payload-bearing matches (`elab-152` → 6, `core-107` → 42) run through the backend. Detail: [the slice ticket](../tickets/backend-slice-1c-i.md). This row's earlier claim — that a program-level enum declaration needs no nominal *value* — held for **payloads** and failed for **type values**: `F(b) = match (b) { True => I64, False => Bool }` used as a type really is a function returning a value |
-| 1c-ii | the structural tier: `Struct`/`Prod`/`Proj`, `Dot` on a record, `Module`/`Imported`, `open` of a module — 41/9/5/8/115/37/6 refusals measured 2026-10-20, with `Module`+`Imported` the two largest buckets in the histogram and **unowned work** (see below). Detail: [its ticket](../tickets/backend-slice-1c-ii.md) |
+| 1c-ii | **the structural tier, and real closures**: `Module`/`Struct`/`RecordConstruct`/`Prod`/`ProdTy`/`Proj`/`Dot` on a record/`Open` over a value/`Imported`, the emitted tier's `Runtime.Module`/`Struct`/`Record`/`Prod`/`ProdTy`/`Member`/`Atom`, `MatchOps`' remaining two members, a lambda that reads an enclosing method's local as an instance method of a generated `Closure_N` over an `object[]`, and a structural value that arrives through the ambient environment (an imported unit's module, a prelude module). **Landed 2026-10-20** — `--parity` 419 → 551 match, 178 → 310 value-match, 0 differ; every refusal this row listed is **0** (`Module` 115, `Struct` 41, `Imported` 37, `Prod` 9, `Dot` 8, `Proj` 5, `open of` 7), and `captured local` 31 → 3, the three being a `rec` over an enclosing local. Closure capture and the structural tier are one slice because each other's cases reach it: a struct method *is* a capturing lambda. Detail: [the slice ticket](../tickets/backend-slice-1c-ii.md), with its three residues filed — [rec over an enclosing local](../tickets/backend-rec-over-an-enclosing-local.md), [a type value has no constructor table](../tickets/backend-type-value-has-no-constructor-table.md), [the object tier forgets a delegate's shape](../tickets/backend-object-tier-delegate-shape.md) |
 | 1d | refs (`VRef`, `RefCell`), effects: the machine for arrows whose row is non-empty, `perform` handing it the machine, `resume` re-entering at its state, one-shot enforced by clearing it | the 43 ref and 55 effect cases, including `core-098` (43), `core-049` (5) and `ref-nbe-continuation-used` (still `error`) |
-| 1e | traits/dictionaries, type-case, generative stamps. **`Sequential` and `TypeSwitch` belong here, not to 1c** — measured 2026-10-20: all 21 `Sequential` refusals are `match (T)` on a `Type` whose arms are `NominalHead`/`AtomType`/`StructType` type patterns (`values/core-078` … `core-096`) | the remaining type-case cases |
+| 1e | traits/dictionaries, type-case, generative stamps. **`Sequential` and `TypeSwitch` belong here, not to 1c** — measured 2026-10-20: the `Sequential` refusals are `match (T)` on a `Type` whose arms are `NominalHead`/`AtomType`/`StructType` type patterns (`values/core-078` … `core-096`). They were 21/3 then and are **36/8** after 1c-ii, which is what a bucket does as upstream walls fall | the remaining type-case cases |
 | 1f | the elaboration-time annotation pass; typed emission everywhere | typed tier; `--backend dotnet` becomes the default in the runner |
 | 2 | `quill build` writing the assembly `PersistedAssemblyBuilder` produces; delete `Driver.Run` as a program path | the binary is the artifact |
 
+**How the table's refusal counts are measured.** `--parity` groups its refusals by message **up to
+the term dump**, and `QUILL_PARITY_CASES=1` adds one line per refusing case (kind, path). It used to
+group by the whole message, and since every message carried `:: <the entire elaborated term>`, the
+histogram read as a list of one-case walls — the 1c-i and 1c-ii counts are the ones measured after
+that fix, and "which programs are behind a bucket" is now one command rather than a briefing.
+
 **Constructs that had no owner, and now do.** `Term.Module` and `Term.Imported` had **no emitting
 case** in `Emitter.cs` and no row in the table, measured 2026-10-19 from the parity histogram
-(`Module` 112 of 900 cases, `Imported` 37). 1c-ii claims both — they are 115 and 37 refusals as of
-2026-10-20 — and the decision it owes first is whether a module is *skipped* (its value is the
-ambient environment `EmitProgram` already builds) or *emitted*. `Term.InsertedMeta` still has no
-case and its cases still present as `backend implicit application`. Because the whole prelude
-arrives as one `Module` term, every later slice meets it.
+(`Module` 112 of 900 cases, `Imported` 37). 1c-ii claimed both and landed both, 2026-10-20: a
+module is *emitted* (`Runtime.Module`, its bindings evaluated in order into locals that the later
+bindings read), while the **prelude's** module is still *skipped* — `EmitProgram` strips the
+`open (import "std")` wrapper and pushes its 38 opened members as the ambient environment, which is
+why no program pays for evaluating the prelude at all. The two decisions do not conflict: the outer splice is
+the ambient environment, anything a program can name is a value. `Term.InsertedMeta` still has no
+case and its cases still present as `backend implicit application`, the largest bucket left (100).
 
 **The match shape 1a′ carries, and why it is not 1b's.** `if (c) { … } else { … }` is not a term: it
 is a syntax macro (`std/lib.qll:14`) that lowers to `Match` over `Bool`. So *any* terminating
@@ -209,7 +268,7 @@ harness are salvaged into 1a′, and its C#-text emitter is dropped, since nothi
 
 ## Open
 
-**What is open is what is left to build, not which way to build it**: slices 1c-ii, 1d, 1e, 1f and 2
+**What is open is what is left to build, not which way to build it**: slices 1d, 1e, 1f and 2
 of the staging table, plus the depth-guard question below. The two choices this section used to
 call live — the effect representation and the IL-writing route — were both **ruled 2026-10-13**
 (sections 1 and 2 below); the option-by-option reading, with the emitted shapes and what each

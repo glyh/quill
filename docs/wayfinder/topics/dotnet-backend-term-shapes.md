@@ -8,9 +8,15 @@ status: open
 # The elaborated term as the emitter receives it
 
 Companion to [the .NET backend](dotnet-backend.md). Dump a term with
-`tools/Quill.DumpTerm` (`quill-dump-term <file.qll> [--expand] [--depth N] [--env N]
-[--ambient N] [--type] [--no-run] [--values] [--max-bytes N]`), which also prints
-`Context.Environment` as de Bruijn indices with each entry's type — the "what does `Var i` mean"
+`tools/Quill.DumpTerm`, which also prints `Context.Environment` as de Bruijn indices with each
+entry's type. **There is no `quill-dump-term` command installed and the project is not in
+`quill.slnx`** — this doc said it was until 2026-10-20, so the first reader to follow it got
+"command not found"; the runnable form is
+
+```sh
+dotnet run --project tools/Quill.DumpTerm -- <file.qll> [--expand] [--depth N] [--env N] \
+    [--ambient N] [--type] [--no-run] [--values] [--max-bytes N]
+``` — the "what does `Var i` mean"
 question, answered directly. `--ambient N` is the index space the emitter actually uses (the
 program's own `open (import "std")` pushes its members first), which `--env N` cannot reach past
 the context's width; `--values` descends into closure environments and is off by default because
@@ -118,11 +124,10 @@ xUnit, and failed **only** at run time on the cases that actually reach a `Destr
 (`InvalidOperationException: a match reached a Con its type rules out`), because the two halves of
 slice 1b were built in parallel and neither could observe the other. A helper class emitted code
 calls into must also be **`public`** (`MatchOps` and `Runtime` alike): an `internal` one builds
-fine and dies as a `MethodAccessException` inside the emitted program. Both copies of the tier bug
-are fixed as of 1c-i (`ConstructorName` in `b416d65`, `Payload` in 1c-i, where payloads made the
-second one reachable); `ProdItem` and `Field` are the same bug and still read the evaluator's tier,
-unreachable until 1c-ii emits a record or a tuple
-([filed](../tickets/backend-matchops-record-wrong-tier.md)).
+fine and dies as a `MethodAccessException` inside the emitted program. All four copies of the tier bug
+are fixed as of 1c-ii (`ConstructorName` in `b416d65`, `Payload` in 1c-i, `ProdItem`/`Field` in
+1c-ii, which made them reachable by emitting a record and a tuple — `Quill.Kernel.Value` no longer
+appears in `MatchOps` at all).
 
 **Two more instances of the same family, 2026-10-20 (`cfc55e7`), and the rule they earn.** The
 emitter meets the term at two places where a count or a tier can be off by one, and both failures
@@ -145,6 +150,25 @@ it double-bound, which at least threw). No case in the suite or the prelude does
 function's written parameter list is exactly its leading `Lam` chain — but an emitted-code
 assertion that the method's arity matches the call site's argument count would be the cheap guard.
 
+**The 1c-ii instances, and the rule they extend (2026-10-20).** Four more of the same family in
+one slice, and the pattern is worth naming because the code looked right every time:
+
+1. **An extra *scope entry* is the same failure as an extra parameter.** `EmitOpen` pushed the
+   container local *and* its opened names, so `{ M = module { pub x = 42; pub y = 10 }; open M;
+   x + y }` read `-` where `+` was written → `32`, and `{ M = module { pub z = 5 }; y = 1; open M;
+   y }` returned a `Module` where an `I64` was expected. **An opened name is an entry; the thing it
+   was read from is not.**
+2. **A pushed field slot** (see *the structural tier* above) → `+` as `-`, `3` → `-1`.
+3. **A cast that was never sound.** `Convert(object → Func<…>)` as a `Castclass` for *any* delegate
+   shape: correct for a value this emitter boxed (a capture, which knows its own shape), wrong for
+   the object tier's generic read. Splitting the two paths (`Exact` for captures, the universal
+   shape only for `Convert`) turned the last `differ` into a refusal.
+4. **A `dup` before `ldftn`** — not a scope error but the same "it compiles and only the runtime
+   disagrees" shape; the recipe is in [the backend topic](dotnet-backend.md).
+
+Every one of them was found the same way: **read the emitted IL**, not the C# emitter. Three of the
+four were balanced, plausible source that no amount of staring at the term would have caught.
+
 So: **a `not ported yet: backend <Node>` message is a claim about the node as the emitter has it,
 not a measurement of the program**, and a wrong answer from emitted code (a `--parity` differ) can
 be an index/tier mistake in the walk rather than a missing feature. Both were found only by
@@ -153,6 +177,108 @@ of failure — which is cheaper than any hypothesis about what the term contains
 have caught both: emit-time assertions that an ambient index is in range and that a `Bne_Un` has
 matching stack tiers.
 
+
+## Verified: the structural tier (1c-ii, 2026-10-20)
+
+Four dumps, each reproduced with the command above. The emitter's shapes for them are
+`Runtime.Module`/`Struct`/`Record`/`Prod`/`ProdTy` (`src/Quill.Backend/Emitter.Structs.cs`).
+
+### A module, and what a binding list's slots are
+
+`{ M = module { pub x = 1 }; M.x }`:
+
+```
+Let { type = Module bindings[2]          # #stamp (Private), x (Public)
+      def  = Module bindings[2]          #   Atom ()  and  Atom 1
+      body = Dot .x (of = Var 0) }
+```
+
+`M` is an ordinary `Let` binding whose value is a *value*: a module is evaluated like anything
+else, so it is emitted like anything else. The whole prelude arrives as one more such module —
+except that `EmitProgram` **strips the program's own `open (import "std")`** and pushes its 38
+opened members as the ambient environment (the module itself has 40 entries), so no program pays for
+them. Both facts are needed and they do
+not conflict: the outer splice *is* the ambient environment, while anything a program can *name* is
+a value.
+
+Two details of the shape: every module's binding list starts with a `#stamp` binding — a `Private`
+`Let` whose def is `Atom ()` — so the list is never empty and a constructor-only module's first
+member is a `Unit` atom, which has no IL shape of its own (`Runtime.Atom`, and why
+`Emitter.EmitAtom` has a non-`I64` case at all). And `Let.Type` holds a whole second `Module`/
+`Struct` term: it is a *type position*, so the emitter reads shapes from it (`ShapeOfTerm`) and
+emits only the `def`.
+
+**An `open` inside a binding list contributes entries, not members.** `{ N = module { pub x = 1 };
+M = module { open N; pub x = 2 }; M.x }` (→ `2`):
+
+```
+Let { type = Module bindings[2]   # #stamp, x      <- the type has 2
+      def  = Module bindings[3]   # #stamp, Open { of = Var 1, members = [field x] }, x
+      body = Dot .x (of = Var 0) }
+```
+
+The `def` has one more binding than its `type` has entries, and `x`'s `Var` index counts the
+opened member — so a module body's binding loop pushes `open`'s members and adds nothing to the
+member table. (I2 at work; `Nbe.cs`'s `Kont.ModuleOpen` leaves `Entries` alone.)
+
+### A struct, a record, and the finding that cost a `differ`
+
+`{ Point = struct { x: I64; y: I64 }; (Point{x = 1; y = 2}).x }`:
+
+```
+Let { type = Struct partial=False conFields=[x, y]          # field types
+      def  = Struct partial=False conFields=[x, y]          # the same, as a value
+      body = Dot .x (of = RecordConstruct { type = Var 0, values = [Atom 1, Atom 2] }) }
+```
+
+`Term.RecordConstruct` carries its struct term and the fields in written order, and a field read is
+a `Dot` on the *record*, not on the type — so the emitted record keeps its type value (a member the
+record has no field for is a method of that type; see below).
+
+**A struct's constructor fields are NOT entries of the scope its bindings are written in.** The
+dumped `{ C = struct { v : I64; pub method a(k : I64) { self.v + k } }; C.a(C{v = 1})(2) }` is
+`Struct { conFields = [(value, I64)], bindings = [Let add (Method) = Lam (Lam (… `self.v + k`))] }`,
+and inside those two `Lam`s `self` is `Var 1` and `+` is `Var 61` — i.e. the body's indices count
+**`x`, `self`, and nothing for the field**. `Nbe.StartStruct`/`ResumeStructField` collect the field
+*types* into the struct's entries without pushing them, and `Nbe`'s binding loop starts from the
+enclosing environment; the elaborator agrees. Emitting a local per field and pushing it (which is
+what `EmitContainer` did first) is off by one and gave `self.value + x` → `-1`, because one local
+too many shifted `+` onto `-`: a wrong answer, not an exception. The field types *are* members of
+the struct's value (`ModuleEntry.Field`, kind `Field`, whose value is the field's **type**) — they
+are just not scope entries.
+
+A method is `Lam{Lam{…}}` stored as a member of the struct **value**, and `Dot` on a struct type
+returns that function unapplied, while `Dot` on a **record** whose fields do not include the name
+applies the type's member to the record (`Nbe.cs`'s `Kont.DotOf`). Both directions are emitted:
+`Runtime.MemberOf(record, name)` falls back to `Runtime.Apply(member of its type, record)`.
+
+### A tuple and `Proj`
+
+`(42, True).0` is `Proj { Index = 0, Of = Prod { Items = [Atom 42, Var 35] } }`, where `Var 35`
+resolves to the prelude's `True` constructor (`field True` in the ambient environment); a tuple type
+arrives as `ProdTy`. `Prod`/`ProdTy` are `Runtime.Prod`/`ProdTy`, and `Proj` is a read of
+`Items[index]` — including when the tuple is a constructor payload reached through
+`Occurrence.Child` (`values/core-113.qll`: `x + yz.0 + yz.1` → `6`).
+
+### The three read rules, which are deliberately different
+
+| read | rule | where |
+| --- | --- | --- |
+| a key expression `e.name` on a module or struct | the **last** visible member of that name (I3) | `Nbe.DotValue` |
+| `e.name` on a record | the **first** field of that name, else the type's member applied to the record | `Nbe.DotValue` + `Kont.DotOf` |
+| a *pattern* binding a field by name | the **last** field of that name | `Nbe.Match.cs:165-167` |
+
+`MatchOps.Field` implements the third and `Runtime.MemberOf` the first two; using one rule for both
+is a silent wrong answer on a record with a repeated label, which is why they are not merged.
+
+### `import` inside a program is a value, not a splice to re-emit
+
+`{ M = import "user"; M.r }` is `Let { def = Imported VModule[…] , body = Dot .r (of = Var 0) }`. A
+unit's term is anchored in the base context (I5), so what crosses is its **value**: emitting the
+splice is `EmitAmbient(value)`, and a `VModule`/`VStruct`/`VRecord`/`VProd`/`VAtom` that arrives
+this way is emitted member by member (or item by item) at the point of use. That is 43 of the cases
+1c-ii closed — the shapes were minefield-free, but they are *values*, so the tier they build must be
+the emitted tier, not the evaluator's.
 
 ## Verified: the nominal tier (1c-i, 2026-10-20)
 
@@ -195,8 +321,9 @@ mostly trait dictionaries.
 
 Where a type is recoverable only from `Context.Environment` and not from the term, say so — that
 is the finding that decides how much of the typed tier is reachable before the annotation pass
-lands. Open questions still owing a dump: (3) a tuple and `Proj`/`Dot` including the method-call
-fallback (`values/method-300.qll`); (4) a `struct`/record and a field access; (5) a ref
+lands. Open questions still owing a dump: ~~(3) a tuple and `Proj`/`Dot` including the method-call
+fallback~~ and ~~(4) a `struct`/record and a field access~~ — **answered 2026-10-20 (1c-ii)**, see
+*the structural tier* above (`values/method-300.qll` included); (5) a ref
 (`values/written-param-type-ref-letbound.qll`); (6) an effect with `resume`
 (`values/core-098.qll`) — and specifically *where the handler and the captured continuation live
 in the term*, since the machine emission depends on it; (7) a trait operation resolving to a
