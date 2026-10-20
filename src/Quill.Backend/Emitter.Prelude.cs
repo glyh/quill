@@ -144,7 +144,10 @@ internal sealed partial class Emitter
         var ctx = new Ctx(method.GetILGenerator(), _methodSeq++, Cty.O);
         var scope = new Scope(closure.Environment);
         for (var i = 0; i < arity; i++) scope = scope.Push(Parameter(i, ctx));
-        var produced = Emit(closure.Body, Cty.O, scope, ctx, tail: true);
+        // The leading Lams are stripped, not emitted: the loop above already binds one
+        // parameter per Lam, so emitting them again binds each one twice, and that extra
+        // local shifts every ambient index in the body by one.
+        var produced = Emit(LamChain(closure.Body).Body, Cty.O, scope, ctx, tail: true);
         Convert(produced, Cty.O, ctx);
         ctx.Il.Emit(OpCodes.Ret);
         return method;

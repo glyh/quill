@@ -88,7 +88,15 @@ internal sealed partial class Emitter
             var next = ctx.Il.DefineLabel();
             ctx.Il.Emit(OpCodes.Ldloc, slot);
             ctx.Il.Emit(OpCodes.Ldc_I8, key.Value);
-            ctx.Il.Emit(OpCodes.Bne_Un, next);
+            // An object-tier scrutinee is a boxed I64 (a prelude parameter), so the
+            // key has to be boxed too: `Bne_Un` on an object and an int64 is not IL.
+            if (ty is Cty.Obj)
+            {
+                ctx.Il.Emit(OpCodes.Box, typeof(long));
+                ctx.Il.Emit(OpCodes.Callvirt, ObjectEquals);
+                ctx.Il.Emit(OpCodes.Brfalse, next);
+            }
+            else ctx.Il.Emit(OpCodes.Bne_Un, next);
             EmitMatchTree(match, @case.Tree, root, expected, scope, ctx, tail, result, end);
             ctx.Il.MarkLabel(next);
         }
@@ -169,6 +177,9 @@ internal sealed partial class Emitter
 
     private static readonly MethodInfo StringEquals =
         typeof(string).GetMethod(nameof(string.Equals), [typeof(string), typeof(string)])!;
+
+    private static readonly MethodInfo ObjectEquals =
+        typeof(object).GetMethod(nameof(object.Equals), [typeof(object)])!;
 }
 
 /// <summary>
