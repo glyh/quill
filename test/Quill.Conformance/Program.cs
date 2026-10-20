@@ -173,6 +173,7 @@ static int RunParity(string root)
     int match = 0, differ = 0, notPorted = 0, valueMatch = 0, bothErrored = 0, notElaborated = 0;
     var kinds = new Dictionary<string, (int Count, string Example)>();
     var examples = new List<string>();
+    var cases = new List<string>();
     foreach (var path in EnumerateCases(root))
     {
         var dir = Path.GetDirectoryName(path)!;
@@ -187,12 +188,19 @@ static int RunParity(string root)
         if (compiled.Error is NotImplementedException)
         {
             notPorted++;
-            // One example case per refusal kind: the histogram says how much a wall costs,
-            // the path says which program is behind it.
-            var kind = compiled.Error.Message;
+            // One entry per refusal kind: the histogram says how much a wall costs, the path
+            // says which program is behind it. The kind is the message up to the term dump --
+            // a message carrying `:: <whole elaborated term>` grouped one case per group, which
+            // reads as a histogram of one-case walls.
+            var message = compiled.Error.Message;
+            var kind = message.Split(" :: ")[0];
             kinds[kind] = kinds.TryGetValue(kind, out var seen)
                 ? (seen.Count + 1, seen.Example)
                 : (1, Path.GetRelativePath(root, path));
+            // QUILL_PARITY_CASES=1 lists every refusing case with its kind: which programs sit
+            // behind a bucket is measured, not guessed, by whoever takes the bucket.
+            if (System.Environment.GetEnvironmentVariable("QUILL_PARITY_CASES") is { Length: > 0 })
+                cases.Add($"{kind}\t{Path.GetRelativePath(root, path)}");
             continue;
         }
         if (Same(interpreted, compiled))
@@ -212,6 +220,7 @@ static int RunParity(string root)
         $" (+{bothErrored} both-errored, +{notElaborated} never elaborated)");
     foreach (var (kind, (n, example)) in kinds.OrderByDescending(k => k.Value.Count))
         Console.WriteLine($"  NOTPORTED {n,4}  {kind}\n                       e.g. {example}");
+    foreach (var line in cases) Console.WriteLine($"  CASE {line}");
     Console.WriteLine($"parity: {match + differ + notPorted} cases, {match} match, {differ} differ, {notPorted} not ported");
     return differ == 0 ? 0 : 1;
 }
