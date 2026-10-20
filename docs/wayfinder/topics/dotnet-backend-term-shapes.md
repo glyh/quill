@@ -114,6 +114,35 @@ slice 1b were built in parallel and neither could observe the other. A helper cl
 calls into must also be **`public`** (`MatchOps` and `Runtime` alike): an `internal` one builds
 fine and dies as a `MethodAccessException` inside the emitted program.
 
+**Two more instances of the same family, 2026-10-20 (`cfc55e7`), and the rule they earn.** The
+emitter meets the term at two places where a count or a tier can be off by one, and both failures
+wore someone else's name:
+
+1. **A binder count, not a nominal.** `EnsureClosureMethod` pushed one parameter per `Lam` in the
+   closure's chain and then emitted the body *with those `Lam`s still on it*, binding each twice.
+   One extra local shifted every ambient lookup one entry out — `<='s `Var 14` named `Option`
+   instead of `i64_to_bool` — and the emitter reported `not ported yet: backend Nominal`, because
+   `Option`'s value is a `VLam` over a closure whose body *is* a `Term.Nominal`. The refusal named
+   a node the emitter had no business reaching, and the term was correct all along.
+2. **A comparison at the wrong tier.** `EmitSwitch` emitted `Ldc_I8 key; Bne_Un` against an
+   object-tier (boxed-`I64`) scrutinee. Not IL, never equal, so every such switch silently ran its
+   default arm: `i64_to_bool(0)` → `True`, `{ 9 <= 2 }` → `True`, `max(2, 9)` → `2`.
+
+Residual risk from fix 1, stated because nothing checks it: `Arity` counts *every* leading `Lam` in
+the closure body as a parameter, so a body that begins with a `Lam` which is **not** one of the
+function's parameters would now emit the wrong number of arguments and silently under-bind (before
+it double-bound, which at least threw). No case in the suite or the prelude does this — a prelude
+function's written parameter list is exactly its leading `Lam` chain — but an emitted-code
+assertion that the method's arity matches the call site's argument count would be the cheap guard.
+
+So: **a `not ported yet: backend <Node>` message is a claim about the node as the emitter has it,
+not a measurement of the program**, and a wrong answer from emitted code (a `--parity` differ) can
+be an index/tier mistake in the walk rather than a missing feature. Both were found only by
+printing the emitter's own arguments — the closure bodies and the `Var`/local counts at the moment
+of failure — which is cheaper than any hypothesis about what the term contains. Checks that would
+have caught both: emit-time assertions that an ambient index is in range and that a `Bne_Un` has
+matching stack tiers.
+
 
 Where a type is recoverable only from `Context.Environment` and not from the term, say so — that
 is the finding that decides how much of the typed tier is reachable before the annotation pass
@@ -122,7 +151,8 @@ fallback (`values/method-300.qll`); (4) a `struct`/record and a field access; (5
 (`values/written-param-type-ref-letbound.qll`); (6) an effect with `resume`
 (`values/core-098.qll`) — and specifically *where the handler and the captured continuation live
 in the term*, since the machine emission depends on it; (7) a trait operation resolving to a
-dictionary (`values/trait-generic-impl-two-bounds.qll`); (8's residue) which `Term` inside a
-prelude closure body carries a `Term.Nominal` — `{ 5 <= 6 }` reaches one and the program term
-itself contains **zero** (measured with a probe), so it is the closure-conversion path's, not the
-general nominal tier's.
+dictionary (`values/trait-generic-impl-two-bounds.qll`); (8's residue) ~~which `Term` inside a prelude
+closure body carries a `Term.Nominal`~~ — **answered 2026-10-20 (`cfc55e7`)**: none does. `{ 5 <= 6 }`
+reached `Option`'s type-former closure through a `Var` index one binder too high (see *the seam*
+above), and all 44 remaining `Nominal` refusals are program-level type declarations, not closure
+bodies.

@@ -155,11 +155,13 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   of the 352, only **111** are the backend agreeing on a value (the rest never ran it); see the
   2026-10-19 frontier entry. Its successor is
   [slice 1b](tickets/backend-slice-1b.md), filed 2026-10-19.
-- [Backend slice 1b](tickets/backend-slice-1b.md) — **filed 2026-10-19 and open**: compile the
-  prelude **value graph** (prelude functions arrive as `VLam` over a `Closure`, so a `Var` needs
-  closure conversion, not a primitive special case) and the rest of `Match` (`Destruct`, payload
-  bindings, nominal keys). Gate: `fib(30)` → `832040` through `Backend.Run`, against the
-  interpreter's **22.5 s** on this machine.
+- [Backend slice 1b](tickets/backend-slice-1b.md) — **landed 2026-10-19 (`926eb49` + `b416d65`) and
+  closed 2026-10-20 (`cfc55e7`)**: compile the prelude **value graph** (prelude functions arrive as
+  `VLam` over a `Closure`, so a `Var` needs closure conversion, not a primitive special case) and
+  the rest of `Match` (`Destruct`, payload bindings, nominal keys). Gate `fib(30)` → `832040`
+  through `Backend.Run`, against the interpreter's **22.5 s** on this machine — met by both the
+  `match` and, from `cfc55e7`, the `if` spelling (`0.81 s`). Current parity numbers live in
+  STATUS, not here.
 - [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
   — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
   annotation table exists, so a typed emitter only gets the signatures the surface wrote
@@ -466,7 +468,8 @@ neither of the two things the parked probe was going to choose between. The tick
   prerequisite of 1b, not 1c** (because `i64_to_bool` — `std/bootstrap.qll:6` — returns
   constructors, so `if (n < 2)` and every prelude predicate need one; the table now says so), and
   **`if` lowers to `Destruct`, never `Switch`** (1a′ carries one literal-`I64` `Switch` shape
-  only). It stays **open on its one residue**, the `Nominal` ticket above.
+  only). It stayed open on its one residue, the `Nominal` ticket above, until `cfc55e7`
+  (2026-10-20).
 - **The parity harness was overstating coverage ~3×, and now does not.** The 352 "match" split
   measured as **value-match 111, both-errored 6, both-elaboration-failed 235** — a case whose
   elaboration fails was counted as a match without either path running. Since there are 658
@@ -489,8 +492,8 @@ neither of the two things the parked probe was going to choose between. The tick
   `Runtime.Con`, `EmitVar`'s ambient fallthrough, closure conversion over `Closure(Environment, Term)`).
   `decision tree` refusals **106 → 17** (Sequential 14, TypeSwitch 3 — both deliberate). `Backend.Run`
   now handles `{ True }`, `{ match (True) { … } }`, `{ if (True) { … } }` and fib(30) in its
-  `match` spelling (`832040`); fib's `if` spelling hits the same residue as `{ 5 <= 6 }`, reported
-  just above, and that residue is the only reason 1b is still open.
+  `match` spelling (`832040`); fib's `if` spelling then hit the same residue as `{ 5 <= 6 }`,
+  reported just above, which was the only reason 1b stayed open until 2026-10-20.
 - **Two halving lessons from 1b, both paid for.** (1) **A `Destruct` cannot run without a
   constructor *value***, so the halves are coupled by their gates even though the code is
   severable — proven by ablation (6 cases land on `EmitDestruct`'s body with a `cases=2 at=Base`
@@ -511,8 +514,9 @@ neither of the two things the parked probe was going to choose between. The tick
   assertion, record `Fix` first) belong to whichever fork next touches the elaborator.
 - **`fib(30)` is the gate and the payoff is real, measured after 1b:** the `match` spelling returns
   **`832040` through `Backend.Run` in 0.59 s against 6.70 s through the interpreter** (`--file`, one
-  process each, same machine); the `if` spelling is blocked by the `Nominal` residue above. The
-  0.9 s refusal at `backend decision tree` that the reconnaissance recorded is the pre-1b state.
+  process each, same machine); the `if` spelling was blocked by the `Nominal` residue above until
+  `cfc55e7`, where it returns `832040` in **0.81 s**. The 0.9 s refusal at `backend decision tree`
+  that the reconnaissance recorded is the pre-1b state.
 - The 2026-10-13 entry below is left as written, with one correction: its fork bullets name two
   forks "running on the re-cut work", and both have since reported — 1a′ merged, the annotation
   finisher unfinished (above).

@@ -37,11 +37,19 @@ Measured, because the obvious reading of the message is wrong. A probe walking t
 `Nominal` the emitter hits is reached only while **compiling a prelude closure body** — it is the
 closure-conversion path's own hole, not 1c's general nominal tier.
 
-The decl is `enum#37`, `declComplete=True ctors=[Some/1, None/0]` — that is `Option`. Captures are
+The decl is `enum#37`, `declComplete=True ctors=[Some/1, None/0]` — that is `Option`. ~~Captures are
 `[Var 7, Var 0]`, so it is a type former applied to two terms, i.e. an `Option(…)` *type* appearing
-inside a closure body rather than a runtime constructor value. `i64_to_bool`'s closure does not
+inside a closure body rather than a runtime constructor value.~~ `i64_to_bool`'s closure does not
 carry one; `<`/`<=`/`min`/`max`/`abs` do. `Options`/`Lists`/`Functors` are ambient entries
 (`std/stage2.qll` and friends), so the likely chain is one of those closures being pulled in.
+
+**Two of those three sentences were wrong, corrected 2026-10-20 (probes below, fix `cfc55e7`).**
+`Captures` is not a list of applied arguments — it is what the `enum` declaration captured in its
+own scope — and no closure is "pulled in": `Option` is reached because the emitter resolves `<`'s
+`Var 14` one entry too far, landing on `Option`'s `VLam`, whose *body* is this `Nominal`. The last
+sentence is the only one that was true: `<`/`<=`/`min`/`max` all fail, `abs` does not, and the
+difference is not which closures they call but **arity** — `abs` has no leading `Lam` to be bound
+twice.
 
 ## The probe, and what it answered (2026-10-20)
 

@@ -29,6 +29,9 @@ as prose. This ticket is 1b, filed so a fork has a name, frontmatter and a gate.
 
 ## Where it stands — 2026-10-19
 
+*Every `currently …` in this ticket is that date's measurement, kept as the acceptance record.
+**All of its gates pass as of `cfc55e7` (2026-10-20)** — see the frontmatter's `resolution`.*
+
 **1b-ii (the `Match` walk) is done**, merged `926eb49`; **1b-i (the prelude value graph) is
 mostly done**, merged `b416d65`, with **one measured residue** (the frontmatter above).
 Integrator's own run on the merged tree, not a fork's report:

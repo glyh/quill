@@ -38,11 +38,11 @@ one, `Struct` 0/1 and 1/3. Unchanged from the 2026-10-13 measurement.
 
 **Why it is still not the frontier's next step:** its own sentence below is the answer — *nothing
 consumes the table yet*. Slice 1f is where a consumer arrives, and 1b proved the emitter can
-reach `132 value-match` with `Let.Type` and the object tier alone (a lambda with no written type
-degrades to `Func<object,object>`, which is slower but correct). So this is **enabling work for
-1f**, and its three items belong to whichever fork next touches the elaborator rather than to a
-fork of their own — with [slice 1b's residue](../tickets/backend-prelude-closure-reaches-nominal.md)
-and 1c ahead of it.
+reach `140 value-match` (was 132 when this was written; `cfc55e7`) with `Let.Type` and the object
+tier alone (a lambda with no written type degrades to `Func<object,object>`, which is slower but
+correct). So this is **enabling work for 1f**, and its three items belong to whichever fork next
+touches the elaborator rather than to a fork of their own — with **1c ahead of it** (1b's residue
+closed 2026-10-20, so nothing of 1b remains).
 
 ## Where it stands — 2026-10-13, two forks died mid-work
 
