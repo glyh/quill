@@ -11,12 +11,48 @@ entries that describe the prototype's own implementation are its record, and its
 `git log`. Paths written in a dated entry are the paths of that date — the port was lifted from
 `dotnet/` to the repo root on 2026-09-26.
 
-Last updated: type-case refinement covers every entry channel and targets the evaluated variable,
-2026-09-29 (954 cases, 0 failed).
+Last updated: the IL backend's slices 1a′ and 1b are landed and measured — 967 cases, 0 failed,
+xUnit 217, parity 0 differ — with one prelude-closure residue open, 2026-10-20.
 
 ---
 
 ## Completed
+
+### The .NET backend — slices 1a′ and 1b (2026-10-19)
+
+The compiler has a second execution path: `Core.term` → IL, built with
+`System.Reflection.Emit` + `PersistedAssemblyBuilder` (`src/Quill.Backend/`), driven by
+`src/Quill.Cli`'s one command, `quill run <file>`. **The interpreter remains the reference** —
+the conformance runner's default and `--file` modes call `Driver.Run` — and `quill build` does
+not exist yet.
+
+- **Slice 1a′ (2026-10-17)** — `Backend.Run`, the emitter for atoms/primitives/`Var`/`Let`/
+  `Lam`/`Ap`/`Fix`, `int64` typed where `Let.Type` says `I64`, and real `tail.` prefixes: a
+  byte-scan of the emitted image finds 1 (self) and 4 (mutual) occurrences, and 20M-deep self and
+  mutual tail probes both exit 0. Slice 1a (Roslyn, C# source) was superseded before merge and
+  its `Runtime.cs`, CLI and parity harness were salvaged.
+- **Slice 1b (2026-10-19, two halves `926eb49` + `b416d65`)** — the rest of `Match` over
+  `DecisionTree`s, and the prelude value graph: `Runtime.Con`, `EmitVar`'s ambient fallthrough,
+  and closure conversion over `Closure(Environment, Term)`. `Sequential` (14 refusals) and
+  `TypeSwitch` (3) remain deliberately out.
+- **Measured on the merged tree** (the integrator's own run, not a fork's): suite **967 cases, 0
+  failed**, xUnit **217/217**, `--parity` **900 cases, 373 match, 0 differ, 527 not ported**
+  (`real coverage: 132 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
+  `{ i64_to_bool(1) }`, `{ not(False) }`, a constructor match, `{ if (True) { 3 } else { 4 } }`
+  and `fib(30)` in its `match` spelling (`832040`, **0.59 s** against **6.70 s** through the
+  interpreter on this machine) all run through the backend.
+- **One open residue** — `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }`, `{ max(2, 9) }` and fib's
+  `if` spelling stop at `not ported yet: backend Nominal`. The elaborated program term contains
+  **zero** `Nominal` nodes, so the one reached is inside a prelude closure body: the
+  closure-conversion path's hole, not slice 1c's nominal tier. See
+  [compiling a prelude closure reaches a Nominal it cannot emit](wayfinder/tickets/backend-prelude-closure-reaches-nominal.md).
+- **Not built** — the typed tier (only `Let.Type`'s written annotations are used; the
+  elaboration-time annotation table is
+  [still owed](wayfinder/tickets/elaborator-records-term-types.md)); `Term.Module`, `Term.Imported`
+  and `Term.InsertedMeta` (no emitting case and no owning slice; `Module` 112 and `Imported` 37
+  first-failures); and `quill build`. Two gaps are filed rather than fixed:
+  [`MatchOps.Payload` reads the evaluator's tier](wayfinder/tickets/backend-matchops-payload-wrong-tier.md)
+  and [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md).
 
 ### The rest of the session's landings (2026-09-28)
 
@@ -978,6 +1014,14 @@ Suite at the end of it: **903 cases, 0 failed**; xUnit **206**.
 ---
 
 ## Active / deferred
+
+### The .NET backend's remaining slices
+- 1c: `Struct`/record/tuple, `Open`, `Proj`/`Dot`, and the general nominal tier
+  (payload-carrying constructors); 1d: refs and effect state machines; 1e: traits/dictionaries
+  and type-case; 1f: typed emission from the annotation pass; 2: `quill build`. The interpreter
+  stays the reference until parity. Staging, acceptance and measurements:
+  [.NET backend](wayfinder/topics/dotnet-backend.md), with the open residue in the
+  [slice 1b ticket](wayfinder/tickets/backend-slice-1b.md).
 
 ### Macro Stages 11–12
 - Stage 11 (macro-powered language features) and Stage 12 (macro diagnostics &
