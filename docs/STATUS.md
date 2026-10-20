@@ -11,8 +11,8 @@ entries that describe the prototype's own implementation are its record, and its
 `git log`. Paths written in a dated entry are the paths of that date — the port was lifted from
 `dotnet/` to the repo root on 2026-09-26.
 
-Last updated: the IL backend's slices 1a′ and 1b are landed and measured — 967 cases, 0 failed,
-xUnit 217, parity 0 differ — with one prelude-closure residue open, 2026-10-20.
+Last updated: the IL backend's slices 1a′ and 1b are landed and measured, the 1b residue is closed
+(`cfc55e7`) — 967 cases, 0 failed, xUnit 217, parity 0 differ — 2026-10-20.
 
 ---
 
@@ -36,16 +36,29 @@ not exist yet.
   and closure conversion over `Closure(Environment, Term)`. `Sequential` (14 refusals) and
   `TypeSwitch` (3) remain deliberately out.
 - **Measured on the merged tree** (the integrator's own run, not a fork's): suite **967 cases, 0
-  failed**, xUnit **217/217**, `--parity` **900 cases, 373 match, 0 differ, 527 not ported**
-  (`real coverage: 132 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
+  failed**, xUnit **217/217**, `--parity` **900 cases, 381 match, 0 differ, 519 not ported**
+  (`real coverage: 140 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
   `{ i64_to_bool(1) }`, `{ not(False) }`, a constructor match, `{ if (True) { 3 } else { 4 } }`
   and `fib(30)` in its `match` spelling (`832040`, **0.59 s** against **6.70 s** through the
-  interpreter on this machine) all run through the backend.
-- **One open residue** — `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }`, `{ max(2, 9) }` and fib's
-  `if` spelling stop at `not ported yet: backend Nominal`. The elaborated program term contains
-  **zero** `Nominal` nodes, so the one reached is inside a prelude closure body: the
-  closure-conversion path's hole, not slice 1c's nominal tier. See
+  interpreter on this machine) all run through the backend. `{ 5 <= 6 }` → `True`,
+  `{ min(3, 4) }` → `3`, `{ max(2, 9) }` → `9` and fib's `if` spelling → **`832040` in 0.81 s**
+  as of `cfc55e7`.
+- **The 1b residue closed 2026-10-20 (`cfc55e7`), and it was neither of the two things the probe
+  was asked to choose between**: not a type position to skip, not the first demand for a nominal
+  value. `EnsureClosureMethod` bound one parameter per `Lam` in a closure's chain *and* emitted
+  the body with those `Lams` still on it, so each was bound twice and every ambient index in the
+  body read one entry too far out — from `i64_to_bool` to `Option`, whose type-former closure the
+  emitter then tried to compile, hence the `Nominal`. One line (`LamChain(...).Body`; the helper
+  was in the file, unused). It exposed a second bug it had hidden: `EmitSwitch` compared an
+  object-tier (boxed-`I64`) scrutinee with `Ldc_I8 … Bne_Un`, which is not IL and never equal, so
+  every such switch ran its default arm — `i64_to_bool(0)` was `True`, `{ 9 <= 2 }` and `max(2, 9)`
+  were wrong. Fixed in the same commit; it is why the two could not land apart, since the strip
+  alone turned 3 suite cases into `differ`s. Detail:
   [compiling a prelude closure reaches a Nominal it cannot emit](wayfinder/tickets/backend-prelude-closure-reaches-nominal.md).
+- **All 44 remaining `Nominal` refusals are program-level type declarations** (`Color = enum { … }`
+  binds a term whose value is a type), which is 1c's, and none of them is inside a prelude closure.
+  So nothing in the backend needs a nominal *value* yet: 1c's first half that matters here is
+  representing/skipping a type declaration, not materialising `Value.VCon.Args`.
 - **Not built** — the typed tier (only `Let.Type`'s written annotations are used; the
   elaboration-time annotation table is
   [still owed](wayfinder/tickets/elaborator-records-term-types.md)); `Term.Module`, `Term.Imported`
@@ -1021,8 +1034,9 @@ Suite at the end of it: **903 cases, 0 failed**; xUnit **206**.
   (payload-carrying constructors); 1d: refs and effect state machines; 1e: traits/dictionaries
   and type-case; 1f: typed emission from the annotation pass; 2: `quill build`. The interpreter
   stays the reference until parity. Staging, acceptance and measurements:
-  [.NET backend](wayfinder/topics/dotnet-backend.md), with the open residue in the
-  [slice 1b ticket](wayfinder/tickets/backend-slice-1b.md).
+  [.NET backend](wayfinder/topics/dotnet-backend.md). Slices 1a′ and 1b are closed, including
+  1b's residue; `Sequential`/`TypeSwitch` and the 44 program-level `Nominal` refusals are 1c's
+  entry points.
 
 ### Macro Stages 11–12
 - Stage 11 (macro-powered language features) and Stage 12 (macro diagnostics &

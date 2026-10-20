@@ -3,20 +3,23 @@ title: Backend slice 1b — compile the prelude value graph and the rest of Matc
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-20
+resolution: Closed 2026-10-20, `cfc55e7`. The residue was **neither** a type position to skip **nor** the first demand for a nominal value — the dichotomy this ticket and its split-out ticket posed was a false one. `<=` never names `Option`: `EnsureClosureMethod` bound one parameter per `Lam` in the closure's chain and then emitted the body *with those Lams still on it*, binding each twice, so every ambient index in the body read one entry too far out — from `i64_to_bool` (context level 50) to `Option` (51), whose value is a `VLam` over a closure whose body is the `Term.Nominal`. The emitter was compiling the `Option` type former as a function. One line (`LamChain(...).Body`, the helper was already in the file, unused). That exposed a second and independent bug it had been hiding: `EmitSwitch` compared an object-tier boxed-`I64` scrutinee with `Ldc_I8 … Bne_Un`, which is not IL and never compares equal, so every such switch took its default arm (`i64_to_bool(0)` → `True`; only the first fix landing turned 3 suite cases into differs). Both fixed together. Full measurement and reasoning: [the residue ticket](backend-prelude-closure-reaches-nominal.md). Gates, integrator's own run on the merged tree: suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases, 381 match, 0 differ, 519 not ported**, `real coverage: 140 value-match` (was 132), `Nominal` refusals **52 → 44** (all 44 now program-level type declarations — 1c), `{ 5 <= 6 }` → `True`, `{ 1 < 2 }` → `True`, `{ 9 <= 2 }` → `False`, `{ min(3, 4) }` → `3`, `{ max(2, 9) }` → `9`, `{ abs(0 - 5) }` → `5`, and the `if` spelling of `fib(30)` → **832040 in 0.81 s**.
 assignee:
 blocked_by: []
 # Filed 2026-10-19 by the integrator, off the reconnaissance below. Slice 1a' landed
 # 2026-10-17. 1b-ii landed 2026-10-19 (926eb49); 1b-i landed the same day (b416d65) with
-# one measured residue left, so this ticket stays OPEN on that residue rather than closing.
+# one measured residue left, which stayed open until `cfc55e7` closed it on 2026-10-20.
 #
 # Residue (2026-10-19): `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }` and the `if` spelling of
 # fib all stop at `not ported yet: backend Nominal`. **Split into its own ticket the same day:**
 # [compiling a prelude closure reaches a Nominal it cannot emit](backend-prelude-closure-reaches-nominal.md).
-# This ticket stays open only until that one lands, then closes as done. The Nominal is inside a
-# **prelude closure body**, not the program: a probe walking the elaborated program term counts
-# **zero** Nominal terms, so it is the closure-conversion path's hole and NOT 1c's general nominal
-# tier.
+# The Nominal is inside a **prelude closure body**, not the program: a probe walking the elaborated
+# program term counts **zero** Nominal terms, so it is the closure-conversion path's hole and NOT
+# 1c's general nominal tier. That reading held; the fix was still smaller than either reading —
+# the closure's captured environment was read at the wrong index, and no nominal value is ever
+# demanded by these programs.
 ---
 
 # Backend slice 1b — compile the prelude value graph and the rest of Match

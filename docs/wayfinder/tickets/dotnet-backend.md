@@ -18,8 +18,8 @@ program can be built and run as a .NET artifact, not only interpreted through Nb
 
 ## Where it stands
 
-- **The backend exists**, past slices 1a′ (landed 2026-10-17) and 1b (landed 2026-10-19, with
-  [one open residue](backend-prelude-closure-reaches-nominal.md)). `Backend.Run` emits IL into a
+- **The backend exists**, past slices 1a′ (landed 2026-10-17) and 1b (landed 2026-10-19, and its
+  [residue](backend-prelude-closure-reaches-nominal.md) closed 2026-10-20). `Backend.Run` emits IL into a
   saved .NET assembly; the staging table, the measurements behind it and the ruling are in
   [the backend topic](../topics/dotnet-backend.md), and the current suite/parity numbers are in
   the map's frontier.

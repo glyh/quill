@@ -276,7 +276,12 @@ as the frontier reaches them.
   appears that no refused node explains (a `differ` is *not* a `not ported`: the backend ran and
   produced the wrong answer, which is why `differ` must stay 0 while `not ported` falls). Deciding
   it needs a probe over `Context.Environment` at closure-creation sites (`Nbe.cs`'s `Term.Lam`
-  case and the value-graph walks), not a design session.
+  case and the value-graph walks), not a design session. **2026-10-20, evidence bearing on it:** the
+  first `differ`s since this entry was written (3 of them) appeared when half of the closure fix
+  landed, i.e. the "sharpens when" condition was met — and they were **not** a non-prefix capture.
+  They were the `EmitSwitch` tier bug, and the ambient read that produced the 1b `Nominal` residue
+  was a *local count* one binder too high, not a wrong environment. So the fog stands as written,
+  with one more way a wrong ambient read can look like a non-prefix capture.
 - ~~**CLR / C# rewrite shape**~~ — the rewrite happened: promoted out of fog to
   [port `core_tt` to .NET (C#)](tickets/port-core-tt-to-dotnet.md), in progress from
   2026-09-16, **at parity 2026-09-25** (`port-fails: 0`, the prototype deleted the same
@@ -416,18 +421,28 @@ as the frontier reaches them.
 
 ## Open questions
 
-### Frontier (2026-09-26 → 2026-10-19)
+### Frontier (2026-09-26 → 2026-10-20)
 
-**2026-10-19 — 21 open**, suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
-373 match, 0 differ, 527 not ported** (`real coverage: 132 value-match`). Slice **1b landed in both
-halves**, and three tickets were filed from it:
+**2026-10-20 — 18 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
+381 match, 0 differ, 519 not ported** (`real coverage: 140 value-match`). Slice **1b is closed**:
+both halves landed 2026-10-19, and its one residue closed 2026-10-20 (`cfc55e7`) — measured to be
+neither of the two things the parked probe was going to choose between. The tickets it left:
 
 - **[Compiling a prelude closure reaches a `Nominal` it cannot emit](tickets/backend-prelude-closure-reaches-nominal.md)**
-  — 1b's one residue, split into its own ticket. `{ 5 <= 6 }`, `{ 1 < 2 }`, `{ min(3, 4) }` and the
-  `if` spelling of `fib(30)` all stop at `backend Nominal`. **Measured: the program term contains
-  zero `Nominal`**, so the one reached is inside a prelude closure body and this is the
-  closure-conversion path's hole, **not** 1c's nominal tier — the next probe is one line of
-  instrumentation.
+  — 1b's one residue, **closed 2026-10-20**. The guess in it (`Let.Type` / a `Pi` domain / a value
+  in the closure's environment) and the split-out ticket's dichotomy ("skip a type position" vs
+  "the first real demand for a nominal value") were both wrong in the same way: the `Nominal` was
+  reachable only through a `Var` index that was **off by one**. `EnsureClosureMethod` bound one
+  parameter per `Lam` in the closure's chain and then emitted the body with those `Lams` still on
+  it, so each was bound twice and the body's ambient lookups all shifted one entry — `i64_to_bool`
+  became `Option`, and `Option`'s value is a `VLam` over a closure whose body is the `Nominal`, so
+  the emitter was compiling a type former as a function. One line, the `LamChain` helper that was
+  already in the file unused. It exposed `EmitSwitch` comparing a boxed-`I64` object-tier
+  scrutinee against `Ldc_I8` (`Bne_Un` across tiers — not IL, never equal, so always the default
+  arm: `i64_to_bool(0)` was `True`), which is why the two fixes had to land together; the strip
+  alone turned 3 suite cases into `differ`s. Lesson worth carrying: **a `not ported yet` message is
+  a claim about the term, not a measurement of it** — here the term was right and the index was
+  wrong.
 - **[`MatchOps.Payload` still reads the interpreter's `Value.VCon`](tickets/backend-matchops-payload-wrong-tier.md)**
   — the second copy of the seam bug fixed in `b416d65`, filed rather than fixed because it is
   unreachable today (`Runtime.Con` has no payloads) and an unexercisable fix is the kind that looks
