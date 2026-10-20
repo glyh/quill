@@ -171,7 +171,7 @@ static (string Line, int Exit) RunChild(string path)
 static int RunParity(string root)
 {
     int match = 0, differ = 0, notPorted = 0, valueMatch = 0, bothErrored = 0, notElaborated = 0;
-    var kinds = new Dictionary<string, int>();
+    var kinds = new Dictionary<string, (int Count, string Example)>();
     var examples = new List<string>();
     foreach (var path in EnumerateCases(root))
     {
@@ -187,8 +187,12 @@ static int RunParity(string root)
         if (compiled.Error is NotImplementedException)
         {
             notPorted++;
+            // One example case per refusal kind: the histogram says how much a wall costs,
+            // the path says which program is behind it.
             var kind = compiled.Error.Message;
-            kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
+            kinds[kind] = kinds.TryGetValue(kind, out var seen)
+                ? (seen.Count + 1, seen.Example)
+                : (1, Path.GetRelativePath(root, path));
             continue;
         }
         if (Same(interpreted, compiled))
@@ -206,8 +210,8 @@ static int RunParity(string root)
     // ran it. Printed before the total so a reader cannot take the big number for coverage.
     Console.WriteLine($"  real coverage: {valueMatch} value-match" +
         $" (+{bothErrored} both-errored, +{notElaborated} never elaborated)");
-    foreach (var (kind, n) in kinds.OrderByDescending(k => k.Value))
-        Console.WriteLine($"  NOTPORTED {n,4}  {kind}");
+    foreach (var (kind, (n, example)) in kinds.OrderByDescending(k => k.Value.Count))
+        Console.WriteLine($"  NOTPORTED {n,4}  {kind}\n                       e.g. {example}");
     Console.WriteLine($"parity: {match + differ + notPorted} cases, {match} match, {differ} differ, {notPorted} not ported");
     return differ == 0 ? 0 : 1;
 }

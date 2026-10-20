@@ -174,19 +174,20 @@ Each slice is separately verifiable and leaves the previous one working.
 | --- | --- | --- |
 | 1a′ | project, runtime, `Reflection.Emit` + `PersistedAssemblyBuilder` host, `Backend.Run`; IL emitter for atoms, primitives, `Var`/`Let`/`Lam`/`Ap`, `Fix`; **plus the one `Match` shape a recursion probe cannot be written without** (below); `int64` typed where `Let.Type` says `I64`; `tail.` at the tail positions a `CanTailcall`-style check accepts | `{ rec double : I64 -> I64 = fn(n) { n + n }; double(21) }` → `42` through the backend, and a 20M-deep self-tail and mutual-tail pair that both survive. **Landed 2026-10-17:** all met, verified on the merged tree — `tail.` prefixes 1 (self) and 4 (mutual) in the emitted image, both 20M runs exit 0 |
 | 1b | the rest of `Match` over `DecisionTree`s (payload bindings, nominal keys, `Destruct`, guards, non-base occurrences), and prelude-function compilation from the value graph. **Landed 2026-10-19 in two halves** (1b-ii `926eb49`, 1b-i `b416d65`), residue closed 2026-10-20 (`cfc55e7`); `Sequential` and `TypeSwitch` deliberately out. Detail: [the slice ticket](../tickets/backend-slice-1b.md) | `fib(30)` → `832040`, and faster than the 13.6 s baseline. **Met by both spellings as of `cfc55e7`:** the `match` one was already met before 1b started (measured 2026-10-19: 0.6 s backend against 7.2 s interpreted at `e1b951a`), and the `if` one returns `832040` in 0.81 s now that its `Nominal` residue is closed. Read the earlier history in the ticket — this table got the gate wrong twice |
-| 1c | `Struct`/record/tuple, `Open`, `Proj`/`Dot`, and **the general nominal tier** (payload-carrying constructors, `Value.VCon.Args`). A *minimal* `Con` — constructor name only, no payloads — was pulled forward into 1b, which this table got wrong: `i64_to_bool` (`std/bootstrap.qll:6`) returns constructors, so `if (n < 2)` and every prelude predicate need one. **Measured 2026-10-20 (`cfc55e7`):** all 44 remaining `Nominal` refusals are program-level type declarations (`X = enum { … }`, `Struct`, `Sig`), i.e. terms whose value is a *type*; **nothing yet needs a nominal value**, so the first half of this slice that unblocks cases is representing or skipping a type declaration | the `values/` match/struct/record population matches the interpreter |
+| 1c-i | **the nominal tier**: `Runtime.Con` payloads, an enum declaration as a value *and* a declaration, `Term.Nominal`/`Term.Open`/`Term.Dot`/`Term.Con`, and a type (`VNominal`, `VAtomTy`) emitted as a value where a term demands one. **Landed 2026-10-20** — `--parity` 381 → 419 match, 140 → 178 value-match, 0 differ, `Nominal` refusals 44 → 0; `{ Color = enum { Red, Green }; open Color; match (Color.Green) { … } }` → 2, and payload-bearing matches (`elab-152` → 6, `core-107` → 42) run through the backend. Detail: [the slice ticket](../tickets/backend-slice-1c-i.md). This row's earlier claim — that a program-level enum declaration needs no nominal *value* — held for **payloads** and failed for **type values**: `F(b) = match (b) { True => I64, False => Bool }` used as a type really is a function returning a value |
+| 1c-ii | the structural tier: `Struct`/`Prod`/`Proj`, `Dot` on a record, `Module`/`Imported`, `open` of a module — 41/9/5/8/115/37/6 refusals measured 2026-10-20, with `Module`+`Imported` the two largest buckets in the histogram and **unowned work** (see below). Detail: [its ticket](../tickets/backend-slice-1c-ii.md) |
 | 1d | refs (`VRef`, `RefCell`), effects: the machine for arrows whose row is non-empty, `perform` handing it the machine, `resume` re-entering at its state, one-shot enforced by clearing it | the 43 ref and 55 effect cases, including `core-098` (43), `core-049` (5) and `ref-nbe-continuation-used` (still `error`) |
-| 1e | traits/dictionaries, type-case, generative stamps | the remaining type-case cases |
+| 1e | traits/dictionaries, type-case, generative stamps. **`Sequential` and `TypeSwitch` belong here, not to 1c** — measured 2026-10-20: all 21 `Sequential` refusals are `match (T)` on a `Type` whose arms are `NominalHead`/`AtomType`/`StructType` type patterns (`values/core-078` … `core-096`) | the remaining type-case cases |
 | 1f | the elaboration-time annotation pass; typed emission everywhere | typed tier; `--backend dotnet` becomes the default in the runner |
 | 2 | `quill build` writing the assembly `PersistedAssemblyBuilder` produces; delete `Driver.Run` as a program path | the binary is the artifact |
 
-**Constructs no slice owns.** Two node kinds have **no emitting case** in `Emitter.cs` and no row
-in the table above, measured 2026-10-19 from the parity histogram: `Term.Module` is the largest
-first-failure bucket (`Module` 112 of 900 cases) and `Term.Imported` accounts for 37 more.
-(`Term.InsertedMeta` also has no case; its cases present as `backend implicit application`.)
-Because the whole prelude arrives as one `Module` term, every later slice meets it. This is
-unowned work, not a slice's residue: the next slice that touches it should either claim it in the
-table or file it as its own ticket.
+**Constructs that had no owner, and now do.** `Term.Module` and `Term.Imported` had **no emitting
+case** in `Emitter.cs` and no row in the table, measured 2026-10-19 from the parity histogram
+(`Module` 112 of 900 cases, `Imported` 37). 1c-ii claims both — they are 115 and 37 refusals as of
+2026-10-20 — and the decision it owes first is whether a module is *skipped* (its value is the
+ambient environment `EmitProgram` already builds) or *emitted*. `Term.InsertedMeta` still has no
+case and its cases still present as `backend implicit application`. Because the whole prelude
+arrives as one `Module` term, every later slice meets it.
 
 **The match shape 1a′ carries, and why it is not 1b's.** `if (c) { … } else { … }` is not a term: it
 is a syntax macro (`std/lib.qll:14`) that lowers to `Match` over `Bool`. So *any* terminating

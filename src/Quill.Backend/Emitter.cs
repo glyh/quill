@@ -8,11 +8,13 @@ namespace Quill.Backend;
 
 /// <summary>
 /// <see cref="Term"/> to IL, built with <see cref="ILGenerator"/> and saved with
-/// <see cref="PersistedAssemblyBuilder"/>. Slice 1a' emits atoms, primitives,
-/// <c>Var</c>/<c>Let</c>/<c>Lam</c>/<c>Ap</c> and <c>Fix</c>, plus the literal
-/// <c>Switch</c> a tail-recursion probe needs, and refuses everything else with a
-/// <see cref="NotImplementedException"/>: an unported path must never satisfy a
-/// case expecting an error.
+/// <see cref="PersistedAssemblyBuilder"/>. Slices 1a′/1b/1c-i emit atoms, primitives,
+/// <c>Var</c>/<c>Let</c>/<c>Lam</c>/<c>Ap</c>/<c>Fix</c>, the whole <c>Match</c> walk except the
+/// type-case trees, the prelude value graph, and the nominal tier (<c>Nominal</c>/<c>Con</c>/
+/// <c>Open</c>/<c>Dot</c> over a nominal). Everything else is refused with a
+/// <see cref="NotImplementedException"/> naming the shape: an unported path must never satisfy a
+/// case expecting an error. Which shapes those are, measured, is in
+/// <c>docs/wayfinder/topics/dotnet-backend.md</c>'s staging table.
 /// </summary>
 /// <remarks>
 /// The emitter compiles a <em>(term, value-environment)</em> pair: a de Bruijn
@@ -45,11 +47,23 @@ internal sealed partial class Emitter
         };
     }
 
-    /// <summary>What a binder in scope names: an IL local, or a generated static method.</summary>
+    /// <summary>What a binder in scope names: an IL local, a generated static method, or a type.</summary>
     private abstract record Binding(Cty Ty)
     {
         public sealed record Local(int Owner, int Slot, Cty Ty) : Binding(Ty);
         public sealed record MethodRef(MethodBuilder Method, Cty Ty) : Binding(Ty);
+
+        /// <summary>
+        /// A nominal type the emitter knows statically (<see cref="Decl"/>), so its
+        /// constructors are read off the declaration instead of off a value.
+        /// <see cref="Former"/> is how a <em>former</em> was bound -- `enum` under a lambda
+        /// chain -- and null for a bare declaration, which emits nothing until a value is
+        /// demanded.
+        /// </summary>
+        public sealed record Nominal(NominalDecl Decl, Cty Ty, MethodRef? Former) : Binding(Ty);
+
+        /// <summary>One constructor of a nominal, as `open` binds it.</summary>
+        public sealed record Ctor(NominalDecl Decl, ConstructorDecl Constructor) : Binding(Cty.O);
     }
 
     /// <summary>The binders in scope, innermost first, over the ambient value environment.</summary>
@@ -133,13 +147,20 @@ internal sealed partial class Emitter
         Term.Var { } v when v.Index >= scope.Locals.Count
             && scope.Ambient[v.Index - scope.Locals.Count] is Value.VLam lam => EmitClosureValue(lam.Body, expected, ctx),
         Term.Var v => EmitVar(v.Index, expected, scope, ctx),
-        Term.Ap ap when PrimitiveSpine(ap, scope) is { } spine => EmitPrimitive(spine, expected, scope, ctx),        // A saturated call of a prelude function: the spine's head is a `VLam` in the
+        Term.Ap ap when PrimitiveSpine(ap, scope) is { } spine => EmitPrimitive(spine, expected, scope, ctx),
+        // A saturated constructor: the payloads become the value's argument array.
+        Term.Ap ap when CtorSpine(ap, scope) is { } call => EmitCtorCall(call, expected, scope, ctx),
+        // A saturated call of a prelude function: the spine's head is a `VLam` in the
         // value graph, and the arguments bind its whole unary chain (Emitter.Prelude.cs).
         Term.Ap ap when ClosureSpine(ap, scope) is { } call => EmitClosureCall(call, expected, scope, ctx, tail),
         Term.Ap ap => EmitApply(ap, expected, scope, ctx, tail),
-        Term.Con con => EmitCon(con, expected, ctx),
+        Term.Con con => EmitConTerm(con, expected, scope, ctx),
+        Term.Nominal nominal => EmitNominalValue(nominal.Decl, expected, ctx),
+        Term.AtomTy atomTy => EmitAtomTypeValue(atomTy.Ty, expected, ctx),
         Term.Let let => EmitLet(let, expected, scope, ctx, tail),
         Term.Lam lam => EmitLam(lam, expected, scope, ctx),
+        Term.Open open => EmitOpen(open, expected, scope, ctx, tail),
+        Term.Dot dot => EmitDot(dot, expected, scope, ctx),
         Term.Match match => EmitMatch(match, expected, scope, ctx, tail),
         _ => throw new NotImplementedException($"not ported yet: backend {term.GetType().Name} :: {term}"),
     };
@@ -166,6 +187,12 @@ internal sealed partial class Emitter
                     throw new NotImplementedException("not ported yet: backend captured local");
                 case Binding.MethodRef method:
                     return EmitMethodValue(method, expected, ctx);
+                case Binding.Nominal nominal when nominal.Former is null:
+                    return EmitNominalValue(nominal.Decl, expected, ctx);
+                case Binding.Nominal { Former: { } former }:
+                    return EmitMethodValue(former, expected, ctx);
+                case Binding.Ctor ctor:
+                    return EmitCtorValue(ctor.Constructor, expected, ctx);
                 default:
                     throw new InvalidOperationException();
             }
@@ -179,15 +206,22 @@ internal sealed partial class Emitter
     private Cty EmitLet(Term.Let let, Cty expected, Scope scope, Ctx ctx, bool tail)
     {
         var ty = ShapeOfTerm(let.Type);
+        // An enum declaration binds a type, and the emitter knows which one: the
+        // constructors are read off the declaration, so nothing is evaluated and no
+        // local is needed. A use in a value position materialises it on demand.
+        if (let.Def is Term.Nominal nominal)
+            return Emit(let.Body, expected, scope.Push(new Binding.Nominal(nominal.Decl, Cty.O, null)), ctx, tail);
         if (let.Def is Term.Fix fix)
         {
             var method = EnsureFixMember(fix, fix.Index, ty, scope);
-            return Emit(let.Body, expected, scope.Push(new Binding.MethodRef(method, ty)), ctx, tail);
+            var value = new Binding.MethodRef(method, ty);
+            return Emit(let.Body, expected, scope.Push(FormerOf(value, fix.Members[fix.Index].Body)), ctx, tail);
         }
         if (let.Def is Term.Lam lam && ty is Cty.Fn fn)
         {
             var method = EnsureLambda(lam, fn, scope);
-            return Emit(let.Body, expected, scope.Push(new Binding.MethodRef(method, ty)), ctx, tail);
+            var value = new Binding.MethodRef(method, ty);
+            return Emit(let.Body, expected, scope.Push(FormerOf(value, lam.Body)), ctx, tail);
         }
         var local = ctx.Il.DeclareLocal(ty.Clr());
         var produced = Emit(let.Def, ty, scope, ctx, tail: false);
@@ -396,6 +430,14 @@ internal sealed partial class Emitter
         return method;
     }
 
+    /// <summary>
+    /// A function binding, and the declaration too when its body is an enum: a former --
+    /// `F = fn(A) { enum { … } }` -- is a value and a declaration at once, so `F(I64)` needs
+    /// the method and `open F` / `F(I64).C` need the declaration.
+    /// </summary>
+    private static Binding FormerOf(Binding.MethodRef value, Term body) =>
+        LamChain(body).Body is Term.Nominal declared ? new Binding.Nominal(declared.Decl, value.Ty, value) : value;
+
     private static Binding LoadParameter(Cty.Fn fn, Ctx ctx)
     {
         ctx.Il.Emit(OpCodes.Ldarg_0);
@@ -422,12 +464,6 @@ internal sealed partial class Emitter
 
     private static ConstructorInfo DelegateCtor(Cty.Fn fn) =>
         fn.Clr().GetConstructor([typeof(object), typeof(IntPtr)])!;
-
-    private static Cty EmitI64(long value, Cty expected, Ctx ctx)
-    {
-        ctx.Il.Emit(OpCodes.Ldc_I8, value);
-        return Convert(Cty.L, expected, ctx);
-    }
 
     // ---- shapes and conversions ---------------------------------------------
 

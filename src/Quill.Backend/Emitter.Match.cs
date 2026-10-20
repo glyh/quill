@@ -14,10 +14,8 @@ namespace Quill.Backend;
 /// arm returns instead.
 /// </summary>
 /// <remarks>
-/// The value tier is the interpreter's: a constructor is a
-/// <see cref="Value.VCon"/>, read by name and payload. That is the interface this
-/// walk needs from the constructor representation; the emitter does not build
-/// one. See docs/wayfinder/topics/dotnet-backend-term-shapes.md.
+/// A constructor is <see cref="Runtime.Con"/>, read by name and payload; the walk builds
+/// constructor values only through the emitter's own <c>EmitCon</c>.
 /// </remarks>
 internal sealed partial class Emitter
 {
@@ -189,10 +187,12 @@ internal sealed partial class Emitter
 /// </summary>
 /// <remarks>
 /// <b>What it reads is the <em>emitted</em> tier, not the interpreter's.</b> A constructor in
-/// emitted code is <see cref="Runtime.Con"/> (name only), never <see cref="Quill.Kernel.Value.VCon"/>:
+/// emitted code is <see cref="Runtime.Con"/> (name and payloads), never <see cref="Quill.Kernel.Value.VCon"/>:
 /// <c>Value</c> belongs to the evaluator and never appears in a running program's heap. Reading
 /// <c>VCon</c> here built and passed xUnit and failed only at run time, on the cases that
-/// actually reach a <c>Destruct</c>.
+/// actually reach a <c>Destruct</c>. <see cref="ConstructorName"/> and <see cref="Payload"/> both
+/// read the emitted tier now; <see cref="ProdItem"/> and <see cref="Field"/> still read the
+/// evaluator's, and are unreachable only until 1c-ii emits a struct or a tuple.
 /// </remarks>
 /// <remarks>
 /// <b>Must stay <c>public</c>, like <see cref="Runtime"/> and for the same reason:</b> the
@@ -214,7 +214,7 @@ public static class MatchOps
     /// <summary>The payload at an index.</summary>
     public static object Payload(object value, int index) => value switch
     {
-        Value.VCon con => con.Args[index],
+        Runtime.Con con => con.Args[index],
         _ => throw new InvalidOperationException($"a match reached a {value?.GetType().Name ?? "null"} its type rules out"),
     };
 

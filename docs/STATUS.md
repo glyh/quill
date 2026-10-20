@@ -11,8 +11,8 @@ entries that describe the prototype's own implementation are its record, and its
 `git log`. Paths written in a dated entry are the paths of that date — the port was lifted from
 `dotnet/` to the repo root on 2026-09-26.
 
-Last updated: the IL backend's slices 1a′ and 1b are landed and measured, the 1b residue is closed
-(`cfc55e7`) — 967 cases, 0 failed, xUnit 217, parity 0 differ — 2026-10-20.
+Last updated: the IL backend's slices 1a′, 1b and 1c-i are landed and measured — 967 cases, 0
+failed, xUnit 217, parity 0 differ — 2026-10-20.
 
 ---
 
@@ -59,14 +59,35 @@ not exist yet.
   binds a term whose value is a type), which is 1c's, and none of them is inside a prelude closure.
   So nothing in the backend needs a nominal *value* yet: 1c's first half that matters here is
   representing/skipping a type declaration, not materialising `Value.VCon.Args`.
+- **Slice 1c-i, the nominal tier (2026-10-20)** — `Runtime.Con` carries payloads and
+  `MatchOps.Payload` reads the emitted tier; an enum declaration is a value *and* a declaration, so
+  its constructors are emitted from the declaration; `Term.Nominal`/`Open`/`Dot`/`Con` are
+  emitted; and a type is emitted as a value (`Runtime.Nominal`, `Runtime.AtomType`) where a term
+  demands one. Measured on the merged tree: suite **967 cases, 0 failed**, xUnit **217/217**,
+  `--parity` **900 cases, 419 match, 0 differ, 481 not ported**, `real coverage: 178 value-match`
+  (was 140), `Nominal` refusals **44 → 0**. Gates: `{ Color = enum { Red, Green }; open Color;
+  match (Color.Green) { Red => 1, Green => 2 } }` → `2`; the 1b residue's five programs unchanged;
+  payload-bearing matches through the backend (`values/elab-152.qll` → `6`,
+  `values/core-107.qll` → `42`, `values/elab-156.qll` → `5`, `values/elab-161.qll` → `4`). The
+  slice's one semantic rule: **a constructor's implicit parameters are exactly its type
+  parameters**, so a saturated constructor spine skips implicit arguments and matches the explicit
+  ones against the declaration's payload arity — without it, every `type T a = …` enum's
+  constructors re-block at `backend implicit application`, which reads like a 1e wall and is not.
+  `Runtime.Nominal` drops the captures on purpose (nothing reads type identity but type-case, which
+  is 1e). Detail:
+  [the slice ticket](wayfinder/tickets/backend-slice-1c-i.md).
 - **Not built** — the typed tier (only `Let.Type`'s written annotations are used; the
   elaboration-time annotation table is
-  [still owed](wayfinder/tickets/elaborator-records-term-types.md)); `Term.Module`, `Term.Imported`
-  and `Term.InsertedMeta` (no emitting case and no owning slice; `Module` 112 and `Imported` 37
-  first-failures); and `quill build`. One gap is filed rather than fixed:
-  [`MatchOps.Payload` reads the evaluator's tier](wayfinder/tickets/backend-matchops-payload-wrong-tier.md).
-  [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md) is **closed**
-  (2026-10-20): the mode now exits 1 the moment `differ > 0`, so it can be a gate.
+  [still owed](wayfinder/tickets/elaborator-records-term-types.md)); the structural tier —
+  `Struct`/`Prod`/`Proj`/`Dot` on a record/`Module`/`Imported`
+  ([1c-ii](wayfinder/tickets/backend-slice-1c-ii.md), which now owns `Module` 115 and `Imported`
+  37, the two largest first-failure buckets); a nested lambda reading another method's local
+  (`captured local`, 31, [filed](wayfinder/tickets/backend-captured-local.md)); and `quill build`.
+  Two gaps are filed rather than fixed: [`MatchOps.Payload`](wayfinder/tickets/backend-matchops-payload-wrong-tier.md)
+  read the evaluator's tier (**closed** 2026-10-20, and checking the rest of the class found
+  [`ProdItem`/`Field`](wayfinder/tickets/backend-matchops-record-wrong-tier.md), still latent until
+  1c-ii). [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md) is
+  **closed** (2026-10-20): the mode now exits 1 the moment `differ > 0`, so it can be a gate.
 
 ### The rest of the session's landings (2026-09-28)
 
@@ -1030,13 +1051,13 @@ Suite at the end of it: **903 cases, 0 failed**; xUnit **206**.
 ## Active / deferred
 
 ### The .NET backend's remaining slices
-- 1c: `Struct`/record/tuple, `Open`, `Proj`/`Dot`, and the general nominal tier
-  (payload-carrying constructors); 1d: refs and effect state machines; 1e: traits/dictionaries
-  and type-case; 1f: typed emission from the annotation pass; 2: `quill build`. The interpreter
-  stays the reference until parity. Staging, acceptance and measurements:
-  [.NET backend](wayfinder/topics/dotnet-backend.md). Slices 1a′ and 1b are closed, including
-  1b's residue; `Sequential`/`TypeSwitch` and the 44 program-level `Nominal` refusals are 1c's
-  entry points.
+- 1c-ii: `Struct`/record/tuple, `Proj`/`Dot` on a record, `Module`/`Imported`, `open` of a module;
+  1d: refs and effect state machines; 1e: traits/dictionaries and type-case; 1f: typed emission
+  from the annotation pass; 2: `quill build`. The interpreter stays the reference until parity.
+  Staging, acceptance and measurements: [.NET backend](wayfinder/topics/dotnet-backend.md). Slices
+  1a′, 1b and 1c-i (the nominal tier) are closed. `Sequential` (21 refusals) and `TypeSwitch` (3)
+  are **1e's, not 1c's** — measured 2026-10-20: every `Sequential` case is `match (T)` on a `Type`
+  with `NominalHead`/`AtomType`/`StructType` arms, i.e. type-case.
 
 ### Macro Stages 11–12
 - Stage 11 (macro-powered language features) and Stage 12 (macro diagnostics &

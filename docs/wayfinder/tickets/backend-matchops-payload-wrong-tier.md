@@ -3,7 +3,9 @@ title: MatchOps.Payload still reads the interpreter's Value.VCon
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-20
+resolution: Closed 2026-10-20 in slice 1c-i. `Payload` reads `Runtime.Con.Args`; `Runtime.Con` gained the argument array, so the path is reachable and is exercised through `--parity` — `values/elab-152.qll` (`Pair(a, Some(b)) => a - b`) → 6, `core-107` → 42, `elab-156` → 5, `elab-161` → 4. The rule this ticket ends with was applied to every other member while here, and two were still violating it: `ProdItem` and `Field` read `Value.VProd`/`Value.VRecord`, unreachable only until 1c-ii emits a record or a tuple — filed as [the record tier ticket](backend-matchops-record-wrong-tier.md) rather than fixed, on exactly this ticket's reasoning that an unexercisable fix looks verified and is not.
 assignee:
 blocked_by: []
 # Found 2026-10-19 by the integrator while fixing the identical bug in
@@ -61,3 +63,11 @@ hold only the latter. A helper emitted code calls into must (a) read the emitted
 (b) be `public`, since it cannot call `internal` — both were violated here and both compiled
 clean. Whichever change next touches `MatchOps` should check every member against both rules,
 not just the one that is failing.
+
+**CLOSED 2026-10-20 — both fixes landed in 1c-i, and the second sentence paid off.**
+`Runtime.Con` is `record Con(string Name, object[] Args)` and `Payload` reads `con.Args[index]`;
+this path now runs for real, confirmed through `--parity` on the payload-binding cases above,
+not through xUnit. Checking the rest of the class found `ProdItem` and `Field` still reading the
+evaluator's tier — the same bug, a third and fourth copy — filed as
+[`MatchOps.ProdItem` and `Field`](backend-matchops-record-wrong-tier.md), because 1c-ii is what
+makes them reachable.

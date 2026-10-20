@@ -11,14 +11,27 @@ namespace Quill.Backend;
 public static class Runtime
 {
     /// <summary>
-    /// A constructor as emitted code carries it: its name, and nothing else. The
-    /// emitted counterpart of <see cref="Quill.Kernel.Value.VCon"/>, so
-    /// <see cref="Describe"/> can render it by name the way
-    /// <see cref="Quill.Compiler.Driver.Describe"/> renders the interpreter's.
+    /// A constructor as emitted code carries it: its name (the tag a match branches
+    /// on) and its payloads. The emitted counterpart of
+    /// <see cref="Quill.Kernel.Value.VCon"/>.
     /// </summary>
-    // shortcut: no payloads, because slice 1b-i only reaches `Bool`; a constructor
-    // with arguments needs an argument array, which is 1c's general nominal tier.
-    public sealed record Con(string Name);
+    public sealed record Con(string Name, object[] Args);
+
+    /// <summary>
+    /// A nominal type as a value: its declared name. The emitted counterpart of
+    /// <see cref="Quill.Kernel.Value.VNominal"/>.
+    /// </summary>
+    // shortcut: no captures and no constructor table, because nothing in emitted code
+    // reads a type's identity yet -- a match branches on a constructor's name, and a
+    // constructor value is built from the term. Type-case reads identity; that is 1e.
+    public sealed record Nominal(string Name);
+
+    /// <summary>
+    /// An atom type as a value, for a term that demands one (<c>fn(X : Type) { X }</c>
+    /// applied to <c>I64</c>). The emitted counterpart of
+    /// <see cref="Quill.Kernel.Value.VAtomTy"/>.
+    /// </summary>
+    public sealed record AtomType(string Name);
 
     /// <summary>
     /// The self-imposed recursion ceiling. The CLR dies with an uncatchable stack
@@ -51,8 +64,8 @@ public static class Runtime
     /// What a program produced, as far as the conformance suite may observe it:
     /// an <c>I64</c> as its digits, a constructor as its name. Anything else is a
     /// debug form no case may depend on. The I64 and constructor cases mirror
-    /// <see cref="Driver.Describe"/>; the rest is the backend's own, and slice 1a
-    /// produces no constructors.
+    /// <see cref="Driver.Describe"/>: a constructor is rendered by name, never by
+    /// payload, exactly as the interpreter renders one.
     /// </summary>
     public static string Describe(object value) => value switch
     {

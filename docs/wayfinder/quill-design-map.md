@@ -162,6 +162,18 @@ detail. (Build-completion status lives in [`docs/STATUS.md`](../STATUS.md).)
   through `Backend.Run`, against the interpreter's **22.5 s** on this machine — met by both the
   `match` and, from `cfc55e7`, the `if` spelling (`0.81 s`). Current parity numbers live in
   STATUS, not here.
+- [Backend slice 1c-i](tickets/backend-slice-1c-i.md) — **landed 2026-10-20**: the nominal tier.
+  `Runtime.Con` carries payloads (`MatchOps.Payload` fixed with it — the second copy of the tier bug
+  `b416d65` fixed, and reachable the moment payloads existed); an enum declaration is a value *and*
+  a declaration, so `open T`/`T.C`/`T.C(args)` are resolved off the declaration instead of off a
+  value; a type is emitted as a value where a term demands one (`Runtime.Nominal`,
+  `Runtime.AtomType`). `--parity` 381 → 419 match, 140 → 178 value-match, **0 differ**, `Nominal`
+  refusals 44 → 0. The rule the slice adds to the backend's vocabulary: **a constructor's implicit
+  parameters are exactly its type parameters**, so a saturated constructor spine skips them —
+  without that, every `type T a = …` enum reads as an `implicit application` wall belonging to 1e.
+  Two corrections to the staging table came with it: 1c splits into 1c-i and
+  [1c-ii (the structural tier)](tickets/backend-slice-1c-ii.md), and **`Sequential`/`TypeSwitch`
+  are 1e's, not 1c's** (measured: all 21 `Sequential` cases are `match (T)` on a `Type`).
 - [The elaborator records a type for every term it builds](tickets/elaborator-records-term-types.md)
   — **open, and the typed tier's prerequisite**: `Lam(Term Body)` carries no domain and no
   annotation table exists, so a typed emitter only gets the signatures the surface wrote
@@ -425,8 +437,18 @@ as the frontier reaches them.
 
 ### Frontier (2026-09-26 → 2026-10-20)
 
-**2026-10-20 — 18 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
-381 match, 0 differ, 519 not ported** (`real coverage: 140 value-match`). Slice **1b is closed**:
+**2026-10-20 — 20 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases,
+419 match, 0 differ, 481 not ported** (`real coverage: 178 value-match`). Slice **1c-i (the nominal
+tier) is closed** the same day, and it retired the frontier's open `MatchOps.Payload` ticket:
+`Runtime.Con` has payloads, so the second copy of the tier bug became reachable, was fixed, and was
+exercised through `--parity` (`values/elab-152.qll` → 6, `core-107` → 42). Checking the rest of
+`MatchOps` while there found the bug twice more (`ProdItem`, `Field`) — filed as
+[the record tier ticket](tickets/backend-matchops-record-wrong-tier.md), latent until 1c-ii. The
+two slices that came out of re-cutting 1c are [1c-i](tickets/backend-slice-1c-i.md) (closed) and
+[1c-ii](tickets/backend-slice-1c-ii.md) (open, and now the owner of the `Module`/`Imported` buckets
+that no slice had claimed); the `captured local` wall (31 cases, the runner's second-largest
+refusal) was [filed on its own](tickets/backend-captured-local.md) because nothing owned it.
+Slice **1b is closed**:
 both halves landed 2026-10-19, and its one residue closed 2026-10-20 (`cfc55e7`) — measured to be
 neither of the two things the parked probe was going to choose between. The tickets it left:
 
@@ -445,10 +467,13 @@ neither of the two things the parked probe was going to choose between. The tick
   alone turned 3 suite cases into `differ`s. Lesson worth carrying: **a `not ported yet` message is
   a claim about the term, not a measurement of it** — here the term was right and the index was
   wrong.
-- **[`MatchOps.Payload` still reads the interpreter's `Value.VCon`](tickets/backend-matchops-payload-wrong-tier.md)**
-  — the second copy of the seam bug fixed in `b416d65`, filed rather than fixed because it is
-  unreachable today (`Runtime.Con` has no payloads) and an unexercisable fix is the kind that looks
-  verified and is not. It detonates at run time inside emitted code the moment 1c adds payloads.
+- **[`MatchOps.Payload` still read the interpreter's `Value.VCon`](tickets/backend-matchops-payload-wrong-tier.md)**
+  — **closed 2026-10-20 with 1c-i.** The second copy of the seam bug fixed in `b416d65`, filed
+  rather than fixed because it was unreachable while `Runtime.Con` had no payloads and an
+  unexercisable fix is the kind that looks verified and is not. 1c-i made it reachable and fixed it
+  in the same change; the prediction ("it detonates at run time inside emitted code the moment 1c
+  adds payloads") held exactly, and the ticket's closing rule — check every `MatchOps` member — found
+  two more copies.
 - **[`--parity` exits 0 when it found differs](tickets/parity-exits-zero-on-differ.md)** —
   **closed 2026-10-20**, same session it was filed in. `RunParity` ended `return 0;`
   unconditionally, so the one mode that can see a backend/interpreter disagreement reported

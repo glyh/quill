@@ -24,39 +24,45 @@ internal sealed partial class Emitter
     // lambdas are different functions, and Term records compare structurally.
     private readonly Dictionary<Closure, MethodBuilder> _closures = new(ReferenceEqualityComparer.Instance);
 
-    private static readonly ConstructorInfo ConCtor = typeof(Runtime.Con).GetConstructor([typeof(string)])!;
+    private static readonly ConstructorInfo ConCtor = typeof(Runtime.Con).GetConstructor([typeof(string), typeof(object[])])!;
 
     // ---- ambient values -----------------------------------------------------
 
     /// <summary>
-    /// An ambient entry: an atom, a constructor, or a prelude lambda. A constructor
-    /// becomes <see cref="Runtime.Con"/>, so <see cref="Runtime.Describe"/> renders
-    /// it by name the way the interpreter's does.
+    /// An ambient entry. A value's natural shape is whatever <see cref="EmitValue"/> gives
+    /// it; a constructor becomes <see cref="Runtime.Con"/> and a type <see cref="Runtime.Nominal"/>
+    /// or <see cref="Runtime.AtomType"/>, so <see cref="Runtime.Describe"/> renders a result the
+    /// way <see cref="Quill.Compiler.Driver.Describe"/> renders the interpreter's.
     /// </summary>
-    private Cty EmitAmbient(Value value, Cty expected, Ctx ctx) => value switch
+    private Cty EmitAmbient(Value value, Cty expected, Ctx ctx) => Convert(EmitValue(value, ctx), expected, ctx);
+
+    private Cty EmitValue(Value value, Ctx ctx) => value switch
     {
-        Value.VAtom { Atom: Atom.I64 n } => EmitI64(n.Value, expected, ctx),
-        Value.VCon con => EmitConValue(con.Name, expected, ctx),
-        Value.VLam lam => EmitClosureValue(lam.Body, expected, ctx),
+        // Before the lambda case: a former-generic constructor is a lambda only because of
+        // its erased type parameter, and the value it denotes is the constructor itself.
+        Value v when AmbientCtor(v) is { } ctor => EmitCtorValue(ctor, Cty.O, ctx),
+        Value.VAtom { Atom: Atom.I64 n } => EmitI64Value(n.Value, ctx),
+        Value.VAtomTy { Ty: var ty } => EmitAtomTypeValue(ty, Cty.O, ctx),
+        Value.VNominal nominal => EmitNominalValue(nominal.Decl, Cty.O, ctx),
+        Value.VCon con => EmitConValue(con, ctx),
+        Value.VLam lam => EmitClosureValue(lam.Body, Cty.ObjFn, ctx),
         _ => throw new NotImplementedException($"not ported yet: backend prelude value ({value.GetType().Name})"),
     };
 
-    /// <summary>The one constructor shape this slice carries: no payloads, so the name is the whole value.</summary>
-    private static Cty EmitCon(Term.Con con, Cty expected, Ctx ctx)
+    private static Cty EmitI64Value(long value, Ctx ctx)
     {
-        // shortcut: a payload-carrying constructor needs its arguments in the emitted
-        // value, which is 1c's general nominal tier (`Value.VCon.Args`).
-        if (con.Args.Length != 0)
-            throw new NotImplementedException("not ported yet: backend constructor payload");
-        return EmitConValue(con.Name, expected, ctx);
+        ctx.Il.Emit(OpCodes.Ldc_I8, value);
+        return Cty.L;
     }
 
-    private static Cty EmitConValue(string name, Cty expected, Ctx ctx)
+    private Cty EmitConValue(Value.VCon con, Ctx ctx)
     {
-        ctx.Il.Emit(OpCodes.Ldstr, name);
-        ctx.Il.Emit(OpCodes.Newobj, ConCtor);
-        return Convert(Cty.O, expected, ctx);
+        EmitCon(con.Name, con.Args.Length, i => EmitValueAsObject(con.Args[i], ctx), ctx);
+        return Cty.O;
     }
+
+    /// <summary>A value in the object tier: what a payload slot and an <c>object</c> parameter take.</summary>
+    private void EmitValueAsObject(Value value, Ctx ctx) => Convert(EmitValue(value, ctx), Cty.O, ctx);
 
     /// <summary>A prelude lambda used as a value: a delegate over its generated method.</summary>
     private Cty EmitClosureValue(Closure closure, Cty expected, Ctx ctx)
