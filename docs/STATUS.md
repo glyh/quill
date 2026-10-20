@@ -11,14 +11,14 @@ entries that describe the prototype's own implementation are its record, and its
 `git log`. Paths written in a dated entry are the paths of that date — the port was lifted from
 `dotnet/` to the repo root on 2026-09-26.
 
-Last updated: the IL backend's slices 1a′, 1b and 1c-i are landed and measured — 967 cases, 0
-failed, xUnit 217, parity 0 differ — 2026-10-20.
+Last updated: the IL backend's slices 1a′, 1b, 1c-i and 1c-ii are landed and measured — 967 cases,
+0 failed, xUnit 217, parity 0 differ, 551 match / 310 value-match — 2026-10-20.
 
 ---
 
 ## Completed
 
-### The .NET backend — slices 1a′, 1b and 1c-i (2026-10-17 → 2026-10-20)
+### The .NET backend — slices 1a′, 1b, 1c-i and 1c-ii (2026-10-17 → 2026-10-20)
 
 The compiler has a second execution path: `Core.term` → IL, built with
 `System.Reflection.Emit` + `PersistedAssemblyBuilder` (`src/Quill.Backend/`), driven by
@@ -36,9 +36,9 @@ not exist yet.
   and closure conversion over `Closure(Environment, Term)`. `Sequential` and `TypeSwitch` were
   left deliberately out and are **1e's, not 1c's** (measured 2026-10-20: all 21 `Sequential`
   refusals are `match (T)` on a `Type`, i.e. type-case).
-- **Measured on the merged tree** (the integrator's own run, not a fork's): suite **967 cases, 0
-  failed**, xUnit **217/217**, `--parity` **900 cases, 381 match, 0 differ, 519 not ported**
-  (`real coverage: 140 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
+- **Measured on 1b's merged tree, 2026-10-19/20** (the integrator's own run, not a fork's): suite
+  **967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases, 381 match, 0 differ, 519 not
+  ported** (`real coverage: 140 value-match`), `decision tree` refusals **106 → 17**. `{ True }`,
   `{ i64_to_bool(1) }`, `{ not(False) }`, a constructor match, `{ if (True) { 3 } else { 4 } }`
   and `fib(30)` in its `match` spelling (`832040`, **0.59 s** against **6.70 s** through the
   interpreter on this machine) all run through the backend. `{ 5 <= 6 }` → `True`,
@@ -68,7 +68,7 @@ not exist yet.
   `MatchOps.Payload` reads the emitted tier; an enum declaration is a value *and* a declaration, so
   its constructors are emitted from the declaration; `Term.Nominal`/`Open`/`Dot`/`Con` are
   emitted; and a type is emitted as a value (`Runtime.Nominal`, `Runtime.AtomType`) where a term
-  demands one. Measured on the merged tree: suite **967 cases, 0 failed**, xUnit **217/217**,
+  demands one. Measured on 1c-i's own tree: suite **967 cases, 0 failed**, xUnit **217/217**,
   `--parity` **900 cases, 419 match, 0 differ, 481 not ported**, `real coverage: 178 value-match`
   (was 140), `Nominal` refusals **44 → 0**. Gates: `{ Color = enum { Red, Green }; open Color;
   match (Color.Green) { Red => 1, Green => 2 } }` → `2`; the 1b residue's five programs unchanged;
@@ -81,18 +81,37 @@ not exist yet.
   `Runtime.Nominal` drops the captures on purpose (nothing reads type identity but type-case, which
   is 1e). Detail:
   [the slice ticket](wayfinder/tickets/backend-slice-1c-i.md).
+- **Slice 1c-ii (2026-10-20)** — the structural tier and real closures, landed together because
+  each one's cases reach the other (a struct method *is* a capturing lambda). `Term.Module`,
+  `Struct`, `RecordConstruct`, `Prod`/`ProdTy`/`Proj`, `Dot` on a value, `Open` over a value and
+  `Imported` all emit; the emitted tier gained `Runtime.Member`, `Module`, `Struct`, `Record`,
+  `Prod`, `ProdTy` and `Atom`; `MatchOps.ProdItem`/`Field` read that tier, so `Quill.Kernel.Value`
+  no longer appears in `MatchOps` at all. A lambda that reads an enclosing method's local becomes
+  an instance method of a generated `Closure_N` over one `object[]`, and a lambda that reads
+  nothing stays a static method, so the prelude value graph and its `tail.` prefixes are untouched.
+  A structural value that arrives through the *ambient* environment (an imported unit's module, a
+  prelude module, a non-`I64` atom) is emitted member by member. `--parity` 419 → **551 match**,
+  178 → **310 value-match**, `differ` 0; every bucket the slice owned is **0**: `Module` 115,
+  `Struct` 41, `Imported` 37, `Prod` 9, `Dot` 8, `Proj` 5, `open of` 7; `captured local` 31 → 3.
+  The four shapes the ticket opened with, through `quill run`: `{ M = module { pub x = 1 }; M.x }`
+  → `1`, `{ C = struct { v : I64 }; C{v=7}.v }` → `7`, `{ (1,2).0 }` → `1`,
+  `{ x = 5; (fn(y) { x + y })(1) }` → `6`; a 20M-deep self-tail probe still `42` in 1.1 s with
+  `tail.` in the image. Detail: [the slice ticket](wayfinder/tickets/backend-slice-1c-ii.md).
 - **Not built** — the typed tier (only `Let.Type`'s written annotations are used; the
   elaboration-time annotation table is
-  [still owed](wayfinder/tickets/elaborator-records-term-types.md)); the structural tier —
-  `Struct`/`Prod`/`Proj`/`Dot` on a record/`Module`/`Imported`
-  ([1c-ii](wayfinder/tickets/backend-slice-1c-ii.md), which now owns `Module` 115 and `Imported`
-  37, the two largest first-failure buckets); a nested lambda reading another method's local
-  (`captured local`, 31, [filed](wayfinder/tickets/backend-captured-local.md)); and `quill build`.
-  Two gaps are filed rather than fixed: [`MatchOps.Payload`](wayfinder/tickets/backend-matchops-payload-wrong-tier.md)
-  read the evaluator's tier (**closed** 2026-10-20, and checking the rest of the class found
-  [`ProdItem`/`Field`](wayfinder/tickets/backend-matchops-record-wrong-tier.md), still latent until
-  1c-ii). [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md) is
-  **closed** (2026-10-20): the mode now exits 1 the moment `differ > 0`, so it can be a gate.
+  [still owed](wayfinder/tickets/elaborator-records-term-types.md)); refs and effects (1d), traits
+  and type-case (1e) — which is where `EffectDecl` 50, `TraitRef` 37, `RefNew` 36 and
+  `Sequential`/`TypeSwitch` 44 sit; `quill build`. 1c-ii left three residues, all filed rather than
+  faked: a `rec` whose body reads an enclosing method's local (3 cases,
+  [filed](wayfinder/tickets/backend-rec-over-an-enclosing-local.md)), a constructor reached
+  through a *type value* (2,
+  [filed](wayfinder/tickets/backend-type-value-has-no-constructor-table.md)), and the object
+  tier's erased delegate shape (1,
+  [filed](wayfinder/tickets/backend-object-tier-delegate-shape.md)). `--parity` now groups its
+  refusals by the message *before* the term dump, and `QUILL_PARITY_CASES=1` lists every refusing
+  case with its kind — the histogram that produced 1c-i's and 1c-ii's bucket counts is measured
+  after that fix. [`--parity` exits 0 on a differ](wayfinder/tickets/parity-exits-zero-on-differ.md)
+  is **closed** (2026-10-20): the mode now exits 1 the moment `differ > 0`, so it can be a gate.
 
 ### The rest of the session's landings (2026-09-28)
 
@@ -1056,13 +1075,14 @@ Suite at the end of it: **903 cases, 0 failed**; xUnit **206**.
 ## Active / deferred
 
 ### The .NET backend's remaining slices
-- 1c-ii: `Struct`/record/tuple, `Proj`/`Dot` on a record, `Module`/`Imported`, `open` of a module;
-  1d: refs and effect state machines; 1e: traits/dictionaries and type-case; 1f: typed emission
+- 1d: refs and effect state machines; 1e: traits/dictionaries and type-case; 1f: typed emission
   from the annotation pass; 2: `quill build`. The interpreter stays the reference until parity.
   Staging, acceptance and measurements: [.NET backend](wayfinder/topics/dotnet-backend.md). Slices
-  1a′, 1b and 1c-i (the nominal tier) are closed. `Sequential` (21 refusals) and `TypeSwitch` (3)
-  are **1e's, not 1c's** — measured 2026-10-20: every `Sequential` case is `match (T)` on a `Type`
-  with `NominalHead`/`AtomType`/`StructType` arms, i.e. type-case.
+  1a′, 1b, 1c-i (the nominal tier) and 1c-ii (the structural tier, with real closures) are closed.
+  `Sequential` and `TypeSwitch` are **1e's, not 1c's** — measured 2026-10-20: every `Sequential`
+  case is `match (T)` on a `Type` with `NominalHead`/`AtomType`/`StructType` arms, i.e. type-case.
+  Their count grew with 1c-ii (**21/3 → 36/8**): the cases were always there, and each wall that
+  falls exposes more of the same family behind it. A refusal count is a *frontier*, not a size.
 
 ### Macro Stages 11–12
 - Stage 11 (macro-powered language features) and Stage 12 (macro diagnostics &

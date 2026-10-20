@@ -274,9 +274,10 @@ as the frontier reaches them.
   again only at run time). **Cheap when it sharpens:** a convention check over
   `src/Quill.Backend/` — every type emitted code touches is public, and no member its helpers read
   is a `Quill.Kernel.Value` — would have caught both instances. **The trigger for writing it has
-  fired:** 1c-i found the third and fourth (`MatchOps.ProdItem`, `Field`), so "the third one earns
-  it" is now the next `src/Quill.Backend/` change's obligation, and they are
-  [filed](tickets/backend-matchops-record-wrong-tier.md) with 1c-ii as their fix. See
+  fired twice over:** 1c-i found the third and fourth (`MatchOps.ProdItem`, `Field`), and 1c-ii
+  fixed them by naming the emitted shapes (`Runtime.Prod`/`ProdTy`/`Record`), which removed
+  `Quill.Kernel.Value` from `MatchOps` entirely. The convention check is still owed — what 1c-ii
+  did was fix the instances, and the obligation the third instance earned was the check. See
   [Payload read the wrong tier](tickets/backend-matchops-payload-wrong-tier.md) and
   [the term-shapes topic](topics/dotnet-backend-term-shapes.md)'s *"The seam this cost a merge"*,
   which records both failure modes with their exact exception names.
@@ -298,6 +299,15 @@ as the frontier reaches them.
   They were the `EmitSwitch` tier bug, and the ambient read that produced the 1b `Nominal` residue
   was a *local count* one binder too high, not a wrong environment. So the fog stands as written,
   with one more way a wrong ambient read can look like a non-prefix capture.
+  **2026-10-20, later the same day (1c-ii):** a *second* closure mechanism landed and it does not
+  rest on this assumption at all — a lambda that reads an enclosing method's local captures by
+  **position in the scope list** (`Binding.Env` replaces the entry in place, the value travels in a
+  generated `object[]`), so it needs no environment to be a prefix, only the length and order of the
+  scope to match the elaborator's context. The 4 `differ`s 1c-ii hit before settling were the same
+  family as 1b's: **pushing a struct's constructor fields as scope entries** shifted every ambient
+  index by one and emitted `+` as `-` (`3` → `-1`). The invariant is now written down in
+  [the term-shapes topic](topics/dotnet-backend-term-shapes.md); the ambient path itself is
+  unchanged, so this fog item is about the *prelude* closures only.
 - ~~**CLR / C# rewrite shape**~~ — the rewrite happened: promoted out of fog to
   [port `core_tt` to .NET (C#)](tickets/port-core-tt-to-dotnet.md), in progress from
   2026-09-16, **at parity 2026-09-25** (`port-fails: 0`, the prototype deleted the same
@@ -439,19 +449,27 @@ as the frontier reaches them.
 
 ### Frontier (2026-09-26 → 2026-10-20)
 
-**2026-10-20 — 20 tickets open** (`status: open` under `tickets/`), suite **967 cases, 0 failed**,
-xUnit **217/217**, `--parity` **900 cases, 419 match, 0 differ, 481 not ported** (`real coverage:
-178 value-match`). The integrator's own run, not a fork's.
+**2026-10-20 (later the same day) — 20 tickets open** (`status: open` under `tickets/`), suite
+**967 cases, 0 failed**, xUnit **217/217**, `--parity` **900 cases, 551 match, 0 differ, 349 not
+ported** (`real coverage: 310 value-match`). The integrator's own run, not a fork's.
 
-- **Slice [1c-i](tickets/backend-slice-1c-i.md) landed** — the backend's nominal tier: `Runtime.Con`
-  payloads, an enum declaration as a value *and* a declaration, a type emitted as a value where a
-  term demands one. It retired the frontier's last backend ticket (`MatchOps.Payload`, below) and
-  cut 1c in two: [1c-ii](tickets/backend-slice-1c-ii.md) (the structural tier) is open and is now
-  the owner of the `Module` (115) and `Imported` (37) buckets that no slice had claimed.
-  [`captured local` (31)](tickets/backend-captured-local.md) was filed on its own because nothing
-  owned it. **Sharpens when**: 1c-ii starts, and the first thing it will need is whether
-  `Term.Module` is skipped (its value is the ambient environment `EmitProgram` already builds) or
-  emitted.
+- **Slice [1c-ii](tickets/backend-slice-1c-ii.md) landed, and it carried real closures** — the
+  structural tier (`Module`/`Struct`/`Record`/`Prod`/`Proj`/`Dot` over a value/`Imported`) plus the
+  closure conversion that [`captured local`](tickets/backend-captured-local.md) (31) had been
+  waiting for since 1b; the two are one slice because each one's cases reach the other — a struct
+  method *is* a capturing lambda. Every bucket 1c-ii claimed is 0; `Module` (115), `Struct` (41) and
+  `Imported` (37) were the histogram's three largest. `captured local` 31 → 3, and those three are
+  a `rec`, filed as [rec over an enclosing local](tickets/backend-rec-over-an-enclosing-local.md).
+  Two refusals the slice *created* rather than inherited are filed with what they need:
+  [a type value has no constructor table](tickets/backend-type-value-has-no-constructor-table.md)
+  (2) and [the object tier forgets a delegate's shape](tickets/backend-object-tier-delegate-shape.md)
+  (1). **Sharpens when**: 1d or 1e starts — both need the same closure objects (`resume` re-enters a
+  machine, a dictionary carries a method), and the largest refusal left is
+  `implicit application` (100), which is 1e's.
+- **Slice [1c-i](tickets/backend-slice-1c-i.md) landed earlier the same day** — the backend's
+  nominal tier: `Runtime.Con` payloads, an enum declaration as a value *and* a declaration, a type
+  emitted as a value where a term demands one. It retired the frontier's last backend ticket
+  (`MatchOps.Payload`, below) and cut 1c in two.
 - **Three tickets closed the same day, and each left a rule.** [`MatchOps.Payload`](tickets/backend-matchops-payload-wrong-tier.md)
   read the interpreter's tier and was unreachable only while `Runtime.Con` had no payloads — its
   prediction held exactly, and the rule it earns (**check every member against both tier and
@@ -461,7 +479,8 @@ xUnit **217/217**, `--parity` **900 cases, 419 match, 0 differ, 481 not ported**
   binder, so **a `not ported yet` message is a claim about the term, not a measurement of it**.
   [`--parity` exiting 0 on a differ](tickets/parity-exits-zero-on-differ.md) is why both seam bugs
   needed a human to read stdout — the mode is a gate now.
-- **`Sequential` (21) and `TypeSwitch` (3) are 1e's, not 1c's** — measured: every `Sequential`
+- **`Sequential` and `TypeSwitch` are 1e's, not 1c's** (21 and 3 refusals when measured; **36 and 8**
+  after 1c-ii, because a wall that falls exposes more of the same family behind it) — measured: every `Sequential`
   refusal is `match (T)` on a `Type` with `NominalHead`/`AtomType`/`StructType` arms, i.e.
   type-case. STATUS and the staging table said otherwise until this run; both are corrected.
 - **Slice 1b is closed** (both halves 2026-10-19, residue `cfc55e7`); its reconnaissance is in
@@ -495,8 +514,10 @@ corrections and the parity harness's coverage bug were measured:
 - **Two constructs no slice owned.** `Term.Module` and `Term.Imported` had **no emitting case** in
   `Emitter.cs` and were named by no slice of the staging table, yet `Module` was the largest
   first-failure bucket — and since the whole prelude arrives as one `Module`, every later slice
-  meets it. **Claimed 2026-10-20 by [1c-ii](tickets/backend-slice-1c-ii.md)** (115 and 37
-  refusals).
+  meets it. **Claimed by [1c-ii](tickets/backend-slice-1c-ii.md) and closed the same day**, 2026-10-20:
+  115 and 37 refusals → **0**, with the module *emitted* as a value and only the prelude's own
+  splice left as the ambient environment. Two constructs with no owner is how the largest bucket in
+  the histogram can have no ticket: a bucket is not a scope.
 - **Slice 1b landed in both halves** (1b-ii `926eb49`, 1b-i `b416d65`) — the `Match` walk over
   `DecisionTree`s (`Emitter.Match.cs`) and the prelude value graph (`Emitter.Prelude.cs`:
   `Runtime.Con`, `EmitVar`'s ambient fallthrough, closure conversion over `Closure(Environment, Term)`).

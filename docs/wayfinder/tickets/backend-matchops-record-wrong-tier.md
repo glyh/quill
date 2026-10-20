@@ -3,9 +3,11 @@ title: MatchOps.ProdItem and Field read the interpreter's tier too
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-20
+resolution: Closed 2026-10-20 in slice 1c-ii. The emitted tier names its own shapes -- `Runtime.Prod`/`ProdTy`/`Record` -- and `ProdItem`/`Field` read those, so `Quill.Kernel.Value` no longer appears in `MatchOps` at all. Item 2: the cases that reach them are exercised through `--parity` and now agree with the interpreter — `values/core-113.qll` (`x + yz.0 + yz.1`) → `6`, `core-135`/`core-136`/`core-137` (tuple and record patterns) → `1`, `core-020`/`core-021` (field reads) → `1`, and the whole 41-case `Struct` bucket. Item 3: `Field` keeps the **last**-wins rule on purpose — `Nbe.Match.cs`'s field occurrence uses `Last` while `Nbe.DotValue` uses `FirstOrDefault`, so a pattern binding and a dot expression are deliberately different reads, and both are now implemented as the interpreter has them. `VProdTy`/`VRecord` as *type* values still need 1e's type-case; nothing in this slice reads a type's identity.
 assignee:
-blocked_by: [backend-slice-1c-ii.md]
+blocked_by: []
 # Filed 2026-10-20 while closing the MatchOps.Payload ticket, which ends with the rule this
 # ticket is the residue of: "whichever change next touches MatchOps should check every member
 # against both rules". Checked: ConstructorName and Payload now read the emitted tier; these two

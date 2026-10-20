@@ -38,10 +38,19 @@ one, `Struct` 0/1 and 1/3. Unchanged from the 2026-10-13 measurement.
 
 **Why it is still not the frontier's next step:** its own sentence below is the answer — *nothing
 consumes the table yet*. Slice 1f is where a consumer arrives, and the emitter has proved it can
-reach **178 value-match** (140 after 1b, 132 before it) with `Let.Type` and the object tier alone (a lambda with no written type degrades to `Func<object,object>`, which is slower but
-correct). So this is **enabling work for 1f**, and its three items belong to whichever fork next
-touches the elaborator rather than to a fork of their own — with **1c-ii ahead of it** (1b closed 2026-10-20 and
-1c-i — the nominal tier — the same day, so neither remains).
+reach **178 value-match** with `Let.Type` and the object tier alone (a lambda with no written type
+degrades to `Func<object,object>`, which is slower but correct). So this is **enabling work for
+1f**, and its three items belong to whichever fork next touches the elaborator rather than to a
+fork of their own.
+
+Dated correction, 2026-10-20 (later the same day): 1c-i and 1c-ii landed, so the frontier is now
+**310 value-match** and the numbers above (140 after 1b, 132 before it, 178 after 1c-i) are the
+records of those trees. The argument is unchanged — the object tier carries the load, and
+`Let.Type` is what keeps a lambda from degrading — but the *case* for 1f is now different in one
+respect worth knowing before starting it: the one refusal 1c-ii left in this family is exactly a
+value read back at a shape the object tier did not record
+([core-061](../tickets/backend-object-tier-delegate-shape.md)), which the annotation table would
+close. 1d and 1e are ahead of it, not 1c-ii.
 
 ## Where it stands — 2026-10-13, two forks died mid-work
 

@@ -3,7 +3,9 @@ title: Backend — a nested lambda reading another method's local
 parent: ../quill-design-map.md
 labels:
   - wayfinder:task
-status: open
+status: closed
+closed_date: 2026-10-20
+resolution: Closed 2026-10-20 in slice 1c-ii, by shape 1 — a generated closure class per capturing lambda, with **one** `object[]` field rather than a field per captured value (`shortcut:` note in `Emitter.EnsureLambda`). A lambda that captures nothing is still a static method, so the prelude value graph and its `tail.` prefixes are untouched (20M-deep self-tail probe: `42` in 1.1 s, `tail.` still in the image). A capturing lambda's body becomes an instance method of `Closure_N`; the delegate is built over the instance, whose `ldftn` needs the object on the stack but does not consume it — a `dup` there is an invalid program, which is how the first draft died. Captures keep their positions in the scope list, so every de Bruijn index, and every ambient index behind it, still means what the elaborator decided. `captured local` refusals **31 → 3**; the three left are not lambdas: a `rec` whose body reads an enclosing local, filed as [rec over an enclosing local](backend-rec-over-an-enclosing-local.md). The `_lambdas` cache is now keyed by (lambda by reference, shapes) — a lambda ensured at two shapes produced a delegate whose signature did not match its method.
 assignee:
 blocked_by: []
 # Filed 2026-10-20 from 1c-i's parity histogram: 31 cases report
